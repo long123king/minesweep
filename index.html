@@ -802,38 +802,65 @@
       }
     }
 
-    // 2. Connected components over frontier cells via shared unknowns.
-    const compId = new Int32Array(N);
-    compId.fill(-1);
+    // 2. Connected components over the bipartite frontier<->unknown graph.
+    //    Two frontiers belong to the same component if they share ANY
+    //    unknown cell (via BFS through unknowns). Previously we only
+    //    linked adjacent frontier cells, which missed cases like two
+    //    non-adjacent '1's sharing an unknown in their neighborhoods —
+    //    this caused severely wrong probabilities on cells in the
+    //    intersection. BFS through the bipartite graph fixes it.
+    const fToU = new Map(); // frontierIdx -> Set<unknownIdx>
+    const uToF = new Map(); // unknownIdx -> Set<frontierIdx>
+    for (const fIdx of frontierCells) {
+      fToU.set(fIdx, new Set());
+      const [fr, fc] = idxRC(fIdx);
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = fr + dr, nc = fc + dc;
+          if (!inBounds(nr, nc)) continue;
+          const nIdx = idxOf(nr, nc);
+          if (!revealed[nr][nc] && !flagged[nr][nc]) {
+            fToU.get(fIdx).add(nIdx);
+            if (!uToF.has(nIdx)) uToF.set(nIdx, new Set());
+            uToF.get(nIdx).add(fIdx);
+          }
+        }
+      }
+    }
+    const compIdF = new Int32Array(N).fill(-1); // frontier idx -> cid
+    const compIdU = new Int32Array(N).fill(-1); // unknown  idx -> cid
     const components = [];
-    for (let fi = 0; fi < frontierCells.length; fi++) {
-      const f = frontierCells[fi];
-      if (compId[f] !== -1) continue;
+    for (const fIdx of frontierCells) {
+      if (compIdF[fIdx] !== -1) continue;
       const cid = components.length;
-      const stack = [f];
-      compId[f] = cid;
       const fset = [];
-      const uset = new Set(); // unknown cell indices in this component
+      const uset = [];
+      const stack = [fIdx];
+      compIdF[fIdx] = cid;
+      fset.push(fIdx);
       while (stack.length) {
         const cur = stack.pop();
-        fset.push(cur);
-        const [cr, cc] = idxRC(cur);
-        for (let dr = -1; dr <= 1; dr++) {
-          for (let dc = -1; dc <= 1; dc++) {
-            if (dr === 0 && dc === 0) continue;
-            const nr = cr + dr, nc = cc + dc;
-            if (!inBounds(nr, nc)) continue;
-            const nIdx = idxOf(nr, nc);
-            if (!revealed[nr][nc] && !flagged[nr][nc]) {
-              uset.add(nIdx);
-            } else if (isFrontier[nIdx] && compId[nIdx] === -1) {
-              compId[nIdx] = cid;
-              stack.push(nIdx);
+        // cur is a frontier. Expand through its unknowns to other frontiers.
+        const us = fToU.get(cur);
+        if (!us) continue;
+        for (const uIdx of us) {
+          if (compIdU[uIdx] === -1) {
+            compIdU[uIdx] = cid;
+            uset.push(uIdx);
+          }
+          const fset2 = uToF.get(uIdx);
+          if (!fset2) continue;
+          for (const f2 of fset2) {
+            if (compIdF[f2] === -1) {
+              compIdF[f2] = cid;
+              fset.push(f2);
+              stack.push(f2);
             }
           }
         }
       }
-      components.push({ frontier: fset, unknowns: Array.from(uset) });
+      components.push({ frontier: fset, unknowns: uset });
     }
 
     // 3. Enumerate configurations per component.
@@ -961,20 +988,124 @@
       : 0;
     analysisCacheGlobalRate = globalRate;
 
-    for (let i = 0; i < N; i++) {
-      if (weight[i] > 0) {
-        out[i] = out[i] / weight[i];
-      } else {
-        out[i] = globalRate;
-        // Attach a global-rate record so the panel can explain it.
-        if (!revealed[Math.floor(i / cols)][i % cols]) {
-          if (!analysisCache.has(i)) analysisCache.set(i, []);
-          analysisCache.get(i).push({
-            componentId: -2,
-            globalRate: true,
+    // Brute-force path: if the total unrevealed-unflagged count is small
+    // enough, enumerate ALL consistent mine placements (filtering by
+    // EVERY revealed-numbered cell's adjacency, including non-frontier
+    // ones) AND the global mine-count constraint (total mines - flags =
+    // remainingMines). This is exact — it gives the true posterior
+    // P(mine) per cell, including the global coupling that component
+    // enumeration ignores. Cost is O(2^F * R) where F = freeCells,
+    // R = revealed constraints. Capped at MAX_BRUTE_FORCE_VARS so the
+    // browser stays responsive; for larger boards we fall back to the
+    // local-component approximation below.
+    const MAX_BRUTE_FORCE_VARS = 22;
+    const freeCells = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!revealed[r][c] && !flagged[r][c]) freeCells.push(idxOf(r, c));
+      }
+    }
+    let usedBruteForce = false;
+    if (freeCells.length > 0 && freeCells.length <= MAX_BRUTE_FORCE_VARS) {
+      // Build all constraints (every revealed cell with adj > 0).
+      const allConstraints = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (!revealed[r][c] || adjacent[r][c] === 0) continue;
+          let flags = 0;
+          const involved = [];
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const nr = r + dr, nc = c + dc;
+              if (!inBounds(nr, nc)) continue;
+              if (flagged[nr][nc]) { flags++; continue; }
+              if (!revealed[nr][nc]) involved.push(idxOf(nr, nc));
+            }
+          }
+          allConstraints.push({ involved, need: adjacent[r][c] - flags });
+        }
+      }
+      // Map freeCell idx -> bit position.
+      const bitOf = new Map();
+      for (let i = 0; i < freeCells.length; i++) bitOf.set(freeCells[i], i);
+      // Translate involved-cell-idxs into bit positions (drop ones not free).
+      const bfConstraints = allConstraints.map(con => {
+        const bits = [];
+        for (const ci of con.involved) {
+          const b = bitOf.get(ci);
+          if (b !== undefined) bits.push(b);
+        }
+        return { bits, need: con.need };
+      });
+      const F = freeCells.length;
+      const limit = 1 << F;
+      const bfMineCount = new Int32Array(F);
+      let bfTotal = 0;
+      for (let bits = 0; bits < limit; bits++) {
+        // Mine count check: popcount must equal remainingMines.
+        let pop = 0;
+        for (let b = 0; b < F; b++) if ((bits >> b) & 1) pop++;
+        if (pop !== remainingMines) continue;
+        // Check every constraint.
+        let ok = true;
+        for (const con of bfConstraints) {
+          let s = 0;
+          for (const b of con.bits) if ((bits >> b) & 1) s++;
+          if (s !== con.need) { ok = false; break; }
+        }
+        if (!ok) continue;
+        bfTotal++;
+        for (let b = 0; b < F; b++) if ((bits >> b) & 1) bfMineCount[b]++;
+      }
+      if (bfTotal > 0) {
+        // Override local-component results with brute-force truth.
+        for (let i = 0; i < N; i++) {
+          out[i] = 0;
+          weight[i] = 0;
+        }
+        for (let b = 0; b < F; b++) {
+          const cellIdx = freeCells[b];
+          out[cellIdx] = bfMineCount[b] / bfTotal;
+          weight[cellIdx] = 1;
+        }
+        // Tag every free cell's analysis record so the panel can mention
+        // the brute-force source. Keep the existing per-component records
+        // for showing constraint equations — but the displayed number is
+        // the brute-force answer.
+        for (let b = 0; b < F; b++) {
+          const cellIdx = freeCells[b];
+          if (!analysisCache.has(cellIdx)) analysisCache.set(cellIdx, []);
+          analysisCache.get(cellIdx).push({
+            componentId: -3,
+            bruteForce: true,
+            bfTotal,
+            bfMineCount: bfMineCount[b],
+            globalRate,
             remainingMines,
             unrevealedTotal,
           });
+        }
+        usedBruteForce = true;
+      }
+    }
+
+    if (!usedBruteForce) {
+      // Fallback: combine component results + global rate for cells outside any frontier.
+      for (let i = 0; i < N; i++) {
+        if (weight[i] > 0) {
+          out[i] = out[i] / weight[i];
+        } else {
+          out[i] = globalRate;
+          if (!revealed[Math.floor(i / cols)][i % cols]) {
+            if (!analysisCache.has(i)) analysisCache.set(i, []);
+            analysisCache.get(i).push({
+              componentId: -2,
+              globalRate: true,
+              remainingMines,
+              unrevealedTotal,
+            });
+          }
         }
       }
     }
@@ -1267,6 +1398,42 @@
     const pct = (p * 100).toFixed(1);
     const pColor = pctColor(p);
 
+    // Brute-force records carry the exact (joint-constraint, global-count)
+    // probability. The component records that may also be present are
+    // useful for highlighting cells on the board, but the displayed
+    // number comes from brute force.
+    const bfRec = records.find(rec => rec.bruteForce);
+    if (bfRec) {
+      const total = bfRec.bfTotal;
+      const withMine = bfRec.bfMineCount;
+      const remaining = bfRec.remainingMines;
+      const totalFree = bfRec.unrevealedTotal;
+      const realRecords = records.filter(rec => !rec.globalRate && !rec.bruteForce);
+      let reason;
+      if (realRecords.length > 0) {
+        reason = reasonForced(realRecords, idx);
+        if (!reason) reason = realRecords.map(rec => reasonPartial(rec)).join(' ');
+      } else {
+        reason = `No number cells touch you directly, so this is set by the global mine count: ${plural(remaining, 'mine')} among ${plural(totalFree, 'unrevealed cell')}.`;
+      }
+      const stats = `<div class="ap-stats">Computed from ${total.toLocaleString()} valid placement${total === 1 ? '' : 's'} matching every constraint and the global mine count (exact)</div>`;
+      const legend = `
+        <div class="ap-legend">
+          <span><i style="background:#ffd866;color:#ffd866"></i> subject</span>
+          <span><i style="background:#5fd7d7;color:#5fd7d7"></i> co-unknown</span>
+          <span><i style="background:transparent;color:#f7a05f;border-style:dashed"></i> constraint</span>
+          <span><i style="background:transparent;color:#ff5555;border-style:dotted"></i> flag</span>
+        </div>`;
+      return `
+        <div class="ap-hero">
+          <span class="ap-cell">Cell ${cellLabel}</span>
+          <span class="ap-pct" style="color:${pColor}">${pct}%</span>
+        </div>
+        <div class="ap-reason">${reason} ${withMine.toLocaleString()} of ${total.toLocaleString()} consistent placements put a mine here.</div>
+        ${stats}
+        ${legend}`;
+    }
+
     const realRecords = records.filter(rec => !rec.globalRate);
     const globalRec  = records.find(rec => rec.globalRate);
 
@@ -1286,7 +1453,7 @@
     const totalCon = totalConstraintCount(realRecords);
 
     const stats = realRecords.length > 0
-      ? `<div class="ap-stats">${totalUnk} unknown cells · ${totalCon} constraint equations · ${realRecords.length} solver region${realRecords.length > 1 ? 's' : ''}</div>`
+      ? `<div class="ap-stats">${totalUnk} unknown cells · ${totalCon} constraint equations · ${realRecords.length} solver region${realRecords.length > 1 ? 's' : ''} · local approximation</div>`
       : `<div class="ap-stats">No local constraints — using global rate only</div>`;
 
     const legend = `
