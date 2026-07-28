@@ -181,28 +181,50 @@
     z-index: 2;
   }
 
-  /* Analysis panel — absolutely-positioned div appended to body. Hidden
-     by default; positioned on hover. Pointer-events disabled so it never
-     intercepts the next hover/click. */
-  #analysis {
-    position: absolute;
-    z-index: 100;
-    background: rgba(20, 20, 28, 0.97);
-    color: var(--text);
+  /* Analysis panel — docked beside the board (no longer floating). Always
+     present in the layout flow so the board stays unobscured. Shows a
+     discoverable placeholder when no cell is hovered; live-updates with
+     math + per-component breakdown during hover. */
+  .game-body {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .board-wrap {
+    /* Sized by its child board grid; flex-shrink:0 keeps it intact. */
+    flex: 0 0 auto;
+  }
+  .analysis-panel {
+    flex: 0 0 280px;
+    min-width: 240px;
+    max-height: calc(var(--cell-size) * 16 + 32px); /* match board vertical extent */
+    overflow-y: auto;
+    background: var(--panel);
     border: 1px solid var(--border-light);
-    border-radius: 6px;
+    border-radius: 4px;
     padding: 10px 12px;
     font-size: 12px;
     line-height: 1.5;
-    max-width: 340px;
-    min-width: 220px;
-    pointer-events: none;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    white-space: normal;
+    color: var(--text);
+    box-sizing: border-box;
   }
-  #analysis.hidden { display: none; }
-  #analysis .a-title {
+  .analysis-panel .ap-empty {
+    color: var(--text-dim);
+    text-align: center;
+    padding: 24px 8px;
+  }
+  .analysis-panel .ap-empty-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .analysis-panel .ap-empty-body {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .analysis-panel .a-title {
     font-size: 13px;
     font-weight: bold;
     margin-bottom: 6px;
@@ -210,23 +232,23 @@
     justify-content: space-between;
     align-items: center;
   }
-  #analysis .a-pct {
+  .analysis-panel .a-pct {
     font-family: "Courier New", monospace;
     font-size: 14px;
     padding: 2px 6px;
     border-radius: 3px;
     background: #0a0a12;
   }
-  #analysis .a-section {
+  .analysis-panel .a-section {
     margin-top: 6px;
     padding-top: 6px;
     border-top: 1px solid var(--border-dark);
   }
-  #analysis .a-section:first-of-type {
+  .analysis-panel .a-section:first-of-type {
     border-top: none;
     padding-top: 0;
   }
-  #analysis .a-heading {
+  .analysis-panel .a-heading {
     font-weight: bold;
     color: var(--text-dim);
     text-transform: uppercase;
@@ -234,17 +256,18 @@
     letter-spacing: 0.5px;
     margin-bottom: 3px;
   }
-  #analysis .a-eq {
+  .analysis-panel .a-eq {
     font-family: "Courier New", monospace;
     font-size: 11px;
     color: #c8c8d8;
     margin: 1px 0;
+    word-break: break-word;
   }
-  #analysis .a-summary {
+  .analysis-panel .a-summary {
     font-size: 12px;
     margin-top: 4px;
   }
-  #analysis .a-legend {
+  .analysis-panel .a-legend {
     display: flex;
     flex-wrap: wrap;
     gap: 6px 12px;
@@ -254,17 +277,31 @@
     font-size: 10px;
     color: var(--text-dim);
   }
-  #analysis .a-legend span {
+  .analysis-panel .a-legend span {
     display: inline-flex;
     align-items: center;
     gap: 4px;
   }
-  #analysis .a-legend i {
+  .analysis-panel .a-legend i {
     display: inline-block;
     width: 10px;
     height: 10px;
     border-radius: 2px;
     border: 1px solid currentColor;
+  }
+
+  /* On narrow screens stack the panel below the board. */
+  @media (max-width: 720px) {
+    .game-body {
+      flex-direction: column;
+      align-items: center;
+    }
+    .analysis-panel {
+      flex: 0 0 auto;
+      width: calc(var(--cell-size) * 9 + 8px);
+      max-width: 100%;
+      max-height: 220px;
+    }
   }
 
   .n1 { color: #5fb3f7; }
@@ -342,7 +379,21 @@
       <button class="face" id="face" title="New game">🙂</button>
       <div class="display" id="timer">000</div>
     </div>
-    <div class="board" id="board"></div>
+    <div class="game-body">
+      <div class="board-wrap">
+        <div class="board" id="board"></div>
+      </div>
+      <!-- Docked analysis panel — lives next to the board, in flow.
+           Shows a discoverable placeholder until the user hovers a cell,
+           then live-updates with the math behind that cell's probability.
+           No longer floats over the board, so highlights stay visible. -->
+      <aside class="analysis-panel" id="analysis" aria-live="polite">
+        <div class="ap-empty">
+          <div class="ap-empty-title">Hover a cell</div>
+          <div class="ap-empty-body">to see how its mine probability was calculated</div>
+        </div>
+      </aside>
+    </div>
     <div class="footer" id="difficulty"></div>
     <div class="footer" id="tools">
       <button class="btn" id="insightBtn" aria-pressed="false">Insight: OFF</button>
@@ -351,10 +402,6 @@
       Left-click: reveal · Right-click / long-press: flag · Click number: chord reveal · Insight: heat-map unrevealed cells by mine probability · Hover a cell: see how its probability was calculated
     </div>
   </div>
-
-  <!-- Floating analysis panel — populated by JS, hidden by default.
-       Lives outside .game so absolute positioning uses viewport coords. -->
-  <div id="analysis" class="hidden" role="tooltip" aria-hidden="true"></div>
 
 <script>
 (() => {
@@ -1064,44 +1111,22 @@
     }
     analysisActive = false;
     analysisSubjectIdx = -1;
-    hidePanel();
+    // Restore the discoverable placeholder so the dock always reads as
+    // intentional, never empty or stale.
+    showPlaceholder();
   }
 
-  function hidePanel() {
-    if (analysisEl) {
-      analysisEl.classList.add("hidden");
-      analysisEl.setAttribute("aria-hidden", "true");
-    }
-  }
+  // Initial placeholder markup — kept as a string constant so we can
+  // restore it cheaply when hover ends or state changes invalidate
+  // the active analysis.
+  const PLACEHOLDER_HTML =
+    '<div class="ap-empty">' +
+      '<div class="ap-empty-title">Hover a cell</div>' +
+      '<div class="ap-empty-body">to see how its mine probability was calculated</div>' +
+    '</div>';
 
-  function positionPanel(anchorRect) {
-    if (!analysisEl) return;
-    const panelW = 320; // matches CSS min-width; will be refined by content
-    const margin = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    // Default: above the cell, left-aligned with the cell.
-    let left = anchorRect.left + anchorRect.width / 2 - panelW / 2;
-    let top  = anchorRect.top - margin - 4; // will be set below panel height
-
-    // Measure after content set.
-    analysisEl.style.left = "0px";
-    analysisEl.style.top  = "0px";
-    analysisEl.classList.remove("hidden");
-    const pr = analysisEl.getBoundingClientRect();
-    const ph = pr.height;
-
-    // Try above first; if it would clip the top, place below.
-    if (top - ph < 4) top = anchorRect.bottom + margin;
-    // Clamp horizontally to viewport with margin.
-    if (left < 4) left = 4;
-    if (left + pr.width > vw - 4) left = vw - pr.width - 4;
-    // Final clamp vertically (in case both above and below clip).
-    if (top + ph > vh - 4) top = vh - ph - 4;
-
-    analysisEl.style.left = left + "px";
-    analysisEl.style.top  = top + "px";
+  function showPlaceholder() {
+    if (analysisEl) analysisEl.innerHTML = PLACEHOLDER_HTML;
   }
 
   function idxToLabel(i) {
@@ -1286,7 +1311,7 @@
     analysisActive = true;
   }
 
-  function showAnalysisForCell(r, c, anchorEl) {
+  function showAnalysisForCell(r, c) {
     const idx = r * cols + c;
     // Only analyze unrevealed unflagged cells (the ones with a probability).
     // Revealed/flagged cells get a brief explanatory panel but no highlights.
@@ -1294,11 +1319,12 @@
 
     ensureSolverFresh();
 
-    // Update panel content.
+    // Update panel content. Panel is docked in the layout flow so no
+    // positioning math is needed — just swap innerHTML and the browser
+    // handles placement. The dock stays at a stable size whether we're
+    // showing the placeholder or live math, so the layout never jumps.
     if (!analysisEl) return;
     analysisEl.innerHTML = buildAnalysis(r, c);
-    analysisEl.setAttribute("aria-hidden", "false");
-    positionPanel(anchorEl.getBoundingClientRect());
 
     // Clear any prior highlights, then apply new ones if applicable.
     if (analysisActive) {
@@ -1344,7 +1370,7 @@
       // Position is anchored to cell, not cursor, so no work needed.
       return;
     }
-    showAnalysisForCell(r, c, target);
+    showAnalysisForCell(r, c);
   }
 
   function handleLeave() {
