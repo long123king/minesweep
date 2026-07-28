@@ -135,6 +135,28 @@
   .cell.mine::before { content: "✸"; color: #000; }
   .cell.wrong-flag::before { content: "✗"; color: #ff5555; }
 
+  /* Insight heat overlay — sits inside each unrevealed/unflagged cell.
+     Empty div with background-color only; toggled via .insight-on on .board. */
+  .cell .overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  .cell {
+    position: relative; /* anchor for .overlay */
+  }
+  .board.insight-on .cell:not(.revealed):not(.flagged) .overlay {
+    display: block;
+  }
+  .board.insight-on .cell.flagged .overlay {
+    /* When flagged, show a faint neutral overlay so user can still see the flag.
+       Use a low-saturation gray that doesn't fight the red flag glyph. */
+    display: block;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
   .n1 { color: #5fb3f7; }
   .n2 { color: #7ec97e; }
   .n3 { color: #f76c5f; }
@@ -150,6 +172,13 @@
     gap: 6px;
     flex-wrap: wrap;
     justify-content: center;
+  }
+  #tools.footer { margin-top: 6px; }
+  #insightBtn.active {
+    background: linear-gradient(90deg, #5fb3f7, #7ec97e, #f7a05f, #f76c5f);
+    color: #0a0a12;
+    border-color: transparent;
+    font-weight: bold;
   }
 
   .btn {
@@ -205,8 +234,11 @@
     </div>
     <div class="board" id="board"></div>
     <div class="footer" id="difficulty"></div>
+    <div class="footer" id="tools">
+      <button class="btn" id="insightBtn" aria-pressed="false">Insight: OFF</button>
+    </div>
     <div class="help">
-      Left-click: reveal · Right-click / long-press: flag · Click number: chord reveal
+      Left-click: reveal · Right-click / long-press: flag · Click number: chord reveal · Insight: heat-map unrevealed cells by mine probability
     </div>
   </div>
 
@@ -228,7 +260,10 @@
   let firstClick, gameOver, won;
   let flagsPlaced, cellsRevealed;
   let startTime, timerInterval;
-  let boardEl, mineCounterEl, timerEl, faceEl;
+  let boardEl, mineCounterEl, timerEl, faceEl, insightBtnEl;
+  let showInsight = false;          // user toggle
+  let pMineCache = null;             // Float32Array(rows*cols), P(cell is a mine) in [0,1]
+  let pMineDirty = true;             // when true, recompute on next paint
 
   // ---------- Utilities ----------
   const inBounds = (r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
@@ -286,6 +321,7 @@
 
     renderBoard();
     highlightActiveDifficulty();
+    invalidateInsight();
   }
 
   function placeMines(safeR, safeC) {
@@ -368,6 +404,8 @@
 
     if (cellsRevealed === rows * cols - mineCount) {
       winGame();
+    } else {
+      invalidateInsight();
     }
   }
 
@@ -400,7 +438,11 @@
       }
     }
     renderCells();
-    if (cellsRevealed === rows * cols - mineCount) winGame();
+    if (cellsRevealed === rows * cols - mineCount) {
+      winGame();
+    } else {
+      invalidateInsight();
+    }
   }
 
   function toggleFlag(r, c) {
@@ -410,6 +452,7 @@
     flagsPlaced += flagged[r][c] ? 1 : -1;
     updateMineCounter();
     renderCell(r, c);
+    invalidateInsight();
   }
 
   // ---------- Win / Lose ----------
@@ -426,6 +469,7 @@
     }
     setFace("lose");
     renderCells();
+    invalidateInsight();   // surfaces ground-truth mines as hot
     // Highlight the mine that killed the player.
     const cellEl = boardEl.children[mineR * cols + mineC];
     if (cellEl) {
@@ -450,6 +494,7 @@
     updateMineCounter();
     setFace("win");
     renderCells();
+    invalidateInsight();   // clears all unrevealed overlays (board is solved)
   }
 
   // ---------- Rendering ----------
@@ -465,6 +510,12 @@
         cell.dataset.r = r;
         cell.dataset.c = c;
         cell.setAttribute("aria-label", `row ${r + 1} column ${c + 1}`);
+        // Overlay div is created once per cell and reused on repaint.
+        // The `.board.insight-on` class drives visibility via CSS so
+        // toggling the overlay does not require touching each cell.
+        const overlay = document.createElement("div");
+        overlay.className = "overlay";
+        cell.appendChild(overlay);
         frag.appendChild(cell);
       }
     }
@@ -476,7 +527,11 @@
     const el = boardEl.children[r * cols + c];
     if (!el) return;
     el.className = "cell";
-    el.textContent = "";
+    // Preserve the overlay div (created once in renderBoard) so we don't
+    // need to recreate 81+ divs on every paint. Wipe text content only.
+    el.childNodes.forEach(n => {
+      if (n.nodeType === Node.TEXT_NODE) n.remove();
+    });
     el.style.background = "";
     if (flagged[r][c]) {
       el.classList.add("flagged");
@@ -488,7 +543,7 @@
     if (board[r][c] === 1) {
       el.classList.add("mine");
     } else if (adjacent[r][c] > 0) {
-      el.textContent = adjacent[r][c];
+      el.appendChild(document.createTextNode(adjacent[r][c]));
       el.classList.add(`n${adjacent[r][c]}`);
     }
   }
@@ -499,6 +554,278 @@
         renderCell(r, c);
       }
     }
+  }
+
+  // ---------- Insight solver ----------
+  // Build a per-cell probability of being a mine. Strategy:
+  //   1. Find frontier — revealed numbered cells whose 8-neighborhood
+  //      contains at least one unrevealed+unflagged cell.
+  //   2. Group frontier cells into connected components via BFS over
+  //      shared unrevealed neighbors. Each component is a small linear
+  //      system of equations over the unrevealed cells it touches.
+  //   3. For each component, enumerate all valid mine placements
+  //      (capped — see MAX_CONFIGS). For every unrevealed cell in the
+  //      component, accumulate (configCount, configsWithMine) — these
+  //      are weighted per component when combining overlapping cells.
+  //   4. Cells not in any frontier component use the global rate:
+  //      remainingMines / remainingUnrevealedCells (capped to [0,1]).
+  // This is the standard local-constraint solver used by Minesweeper
+  // assistants. Subset-decomposition across components (a cell can sit
+  // in two) gives the weighted combination automatically.
+  const MAX_CONFIGS = 1 << 20;     // hard cap on enumerations per component
+  const MAX_VARS    = 22;          // if a component touches more vars, skip it
+
+  function computeProbabilities() {
+    const N = rows * cols;
+    const out = new Float32Array(N);   // pMine per cell, default 0
+    const weight = new Float32Array(N); // total weight (config counts) per cell
+    if (gameOver) {
+      // After win/lose the answer is known exactly; surface it so the
+      // overlay reflects ground truth instead of stale probability.
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const idx = r * cols + c;
+          if (board[r][c] === 1) { out[idx] = 1; weight[idx] = 1; }
+        }
+      }
+      pMineCache = out;
+      return out;
+    }
+
+    // Index helper.
+    const idxOf = (r, c) => r * cols + c;
+    const idxRC = idx => [Math.floor(idx / cols), idx % cols];
+
+    // 1. Build frontier list: revealed-numbered cells that border at
+    //    least one unrevealed+unflagged cell.
+    const isFrontier = new Uint8Array(N);
+    const frontierId = new Int32Array(N); // -1 = not frontier
+    frontierId.fill(-1);
+    const frontierCells = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!revealed[r][c] || adjacent[r][c] === 0) continue;
+        let hasUnknown = false;
+        for (let dr = -1; dr <= 1 && !hasUnknown; dr++) {
+          for (let dc = -1; dc <= 1 && !hasUnknown; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = r + dr, nc = c + dc;
+            if (inBounds(nr, nc) && !revealed[nr][nc] && !flagged[nr][nc]) {
+              hasUnknown = true;
+            }
+          }
+        }
+        if (hasUnknown) {
+          isFrontier[idxOf(r, c)] = 1;
+          frontierId[idxOf(r, c)] = frontierCells.length;
+          frontierCells.push(idxOf(r, c));
+        }
+      }
+    }
+
+    // 2. Connected components over frontier cells via shared unknowns.
+    const compId = new Int32Array(N);
+    compId.fill(-1);
+    const components = [];
+    for (let fi = 0; fi < frontierCells.length; fi++) {
+      const f = frontierCells[fi];
+      if (compId[f] !== -1) continue;
+      const cid = components.length;
+      const stack = [f];
+      compId[f] = cid;
+      const fset = [];
+      const uset = new Set(); // unknown cell indices in this component
+      while (stack.length) {
+        const cur = stack.pop();
+        fset.push(cur);
+        const [cr, cc] = idxRC(cur);
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = cr + dr, nc = cc + dc;
+            if (!inBounds(nr, nc)) continue;
+            const nIdx = idxOf(nr, nc);
+            if (!revealed[nr][nc] && !flagged[nr][nc]) {
+              uset.add(nIdx);
+            } else if (isFrontier[nIdx] && compId[nIdx] === -1) {
+              compId[nIdx] = cid;
+              stack.push(nIdx);
+            }
+          }
+        }
+      }
+      components.push({ frontier: fset, unknowns: Array.from(uset) });
+    }
+
+    // 3. Enumerate configurations per component.
+    for (const comp of components) {
+      const vars = comp.unknowns;
+      const m = vars.length;
+      if (m === 0) continue;
+      if (m > MAX_VARS) continue; // too big — fall back to global rate
+
+      // For each frontier cell, count (flags + mines among unknowns).
+      // The constraint is: flags_in_8nb + mines_in_unknowns = adjacency.
+      const constraints = []; // [{ varsIdx: [indices into vars], need: int }]
+      for (const fIdx of comp.frontier) {
+        const [fr, fc] = idxRC(fIdx);
+        let flags = 0;
+        const involvedVars = [];
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = fr + dr, nc = fc + dc;
+            if (!inBounds(nr, nc)) continue;
+            if (flagged[nr][nc]) { flags++; continue; }
+            if (!revealed[nr][nc]) {
+              const v = vars.indexOf(idxOf(nr, nc));
+              if (v !== -1) involvedVars.push(v);
+            }
+          }
+        }
+        constraints.push({ vars: involvedVars, need: adjacent[fr][fc] - flags });
+      }
+
+      // Enumerate all 2^m assignments. Filter to those satisfying every
+      // constraint. Accumulate per-variable "mine count" and total configs.
+      const mineCountArr = new Int32Array(m);
+      let totalConfigs = 0;
+      const limit = Math.min(1 << m, MAX_CONFIGS);
+      for (let bits = 0; bits < limit; bits++) {
+        let ok = true;
+        for (const con of constraints) {
+          let s = 0;
+          for (const v of con.vars) if ((bits >> v) & 1) s++;
+          if (s !== con.need) { ok = false; break; }
+        }
+        if (!ok) continue;
+        totalConfigs++;
+        for (let v = 0; v < m; v++) {
+          if ((bits >> v) & 1) mineCountArr[v]++;
+        }
+      }
+
+      if (totalConfigs === 0) continue;
+
+      // Weight by totalConfigs so a more-informative component dominates
+      // for cells that lie in multiple components.
+      for (let v = 0; v < m; v++) {
+        const cellIdx = vars[v];
+        out[cellIdx]     += mineCountArr[v];
+        weight[cellIdx]  += totalConfigs;
+      }
+    }
+
+    // 4. Combine + global-rate fallback for cells outside any frontier.
+    let remainingMines = mineCount - flagsPlaced;
+    let unrevealedTotal = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!revealed[r][c] && !flagged[r][c]) unrevealedTotal++;
+      }
+    }
+    const globalRate = unrevealedTotal > 0
+      ? Math.max(0, Math.min(1, remainingMines / unrevealedTotal))
+      : 0;
+
+    for (let i = 0; i < N; i++) {
+      if (weight[i] > 0) {
+        out[i] = out[i] / weight[i];
+      } else {
+        out[i] = globalRate;
+      }
+    }
+
+    // Revealed non-mine cells get pMine=0 for completeness.
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (revealed[r][c] && board[r][c] !== 1) {
+          out[idxOf(r, c)] = 0;
+        }
+      }
+    }
+
+    pMineCache = out;
+    return out;
+  }
+
+  // Map a probability in [0,1] to a hot↔cool CSS color.
+  // 0.00 → deep cool blue (#2a5fb7)
+  // 0.50 → neutral dark (#3a3a4f, lets the cell face show through)
+  // 1.00 → deep hot red (#b73a3a)
+  // We use a piecewise gradient with three stops so the cool half and
+  // hot half read distinctly, and 0.5 stays muted to avoid confusion
+  // with revealed numbers.
+  function probToColor(p) {
+    const cp = Math.max(0, Math.min(1, p));
+    // Three stops: cool(0.0) → neutral(0.5) → hot(1.0).
+    const stops = [
+      { t: 0.0, r: 42,  g: 95,  b: 183 }, // #2a5fb7 cool
+      { t: 0.5, r: 58,  g: 58,  b: 79  }, // #3a3a4f neutral
+      { t: 1.0, r: 183, g: 58,  b: 58  }, // #b73a3a hot
+    ];
+    let lo = stops[0], hi = stops[stops.length - 1];
+    for (let i = 0; i < stops.length - 1; i++) {
+      if (cp >= stops[i].t && cp <= stops[i + 1].t) {
+        lo = stops[i]; hi = stops[i + 1]; break;
+      }
+    }
+    const span = hi.t - lo.t || 1;
+    const f = (cp - lo.t) / span;
+    const r = Math.round(lo.r + (hi.r - lo.r) * f);
+    const g = Math.round(lo.g + (hi.g - lo.g) * f);
+    const b = Math.round(lo.b + (hi.b - lo.b) * f);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  function paintInsight() {
+    if (!showInsight) return;
+    if (!pMineCache || pMineDirty) {
+      computeProbabilities();
+      pMineDirty = false;
+    }
+    const p = pMineCache;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cellEl = boardEl.children[r * cols + c];
+        if (!cellEl) continue;
+        const overlay = cellEl.querySelector(".overlay");
+        if (!overlay) continue;
+        if (revealed[r][c] || flagged[r][c]) {
+          // CSS handles flagged dim overlay; revealed get nothing.
+          overlay.style.background = "";
+          continue;
+        }
+        overlay.style.background = probToColor(p[r * cols + c]);
+      }
+    }
+  }
+
+  function clearInsight() {
+    for (const cellEl of boardEl.children) {
+      const overlay = cellEl.querySelector(".overlay");
+      if (overlay) overlay.style.background = "";
+    }
+  }
+
+  function setInsight(on) {
+    showInsight = !!on;
+    boardEl.classList.toggle("insight-on", showInsight);
+    insightBtnEl.classList.toggle("active", showInsight);
+    insightBtnEl.textContent = showInsight ? "Insight: ON" : "Insight: OFF";
+    insightBtnEl.setAttribute("aria-pressed", showInsight ? "true" : "false");
+    if (showInsight) {
+      pMineDirty = true;
+      paintInsight();
+    } else {
+      clearInsight();
+    }
+  }
+
+  // Mark insight cache stale on any state change while the toggle is on.
+  function invalidateInsight() {
+    pMineDirty = true;
+    if (showInsight) paintInsight();
   }
 
   // ---------- Difficulty buttons ----------
@@ -552,7 +879,9 @@
   mineCounterEl = document.getElementById("mineCounter");
   timerEl       = document.getElementById("timer");
   faceEl        = document.getElementById("face");
+  insightBtnEl  = document.getElementById("insightBtn");
   faceEl.addEventListener("click", () => newGame());
+  insightBtnEl.addEventListener("click", () => setInsight(!showInsight));
 
   // Board-level listeners (must run AFTER boardEl is assigned).
   boardEl.addEventListener("contextmenu", e => {
