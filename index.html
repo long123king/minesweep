@@ -157,6 +157,116 @@
     background: rgba(255, 255, 255, 0.05);
   }
 
+  /* Hover analysis — outlines on cells that contributed to the subject's
+     probability. Driven by .board.analysis-active on the board element
+     (single class, no per-cell state needed). */
+  .board.analysis-active .cell.hover-subject {
+    outline: 2px solid #ffd866;            /* gold = "you are here" */
+    outline-offset: -2px;
+    z-index: 3;
+  }
+  .board.analysis-active .cell.hover-co {
+    outline: 2px solid #5fd7d7;            /* cyan = sibling unknown */
+    outline-offset: -2px;
+    z-index: 2;
+  }
+  .board.analysis-active .cell.hover-constraint {
+    outline: 2px dashed #f7a05f;           /* orange dashed = constraint number */
+    outline-offset: -2px;
+    z-index: 2;
+  }
+  .board.analysis-active .cell.hover-flag {
+    outline: 2px dotted #ff5555;           /* red dotted = contributing flag */
+    outline-offset: -2px;
+    z-index: 2;
+  }
+
+  /* Analysis panel — absolutely-positioned div appended to body. Hidden
+     by default; positioned on hover. Pointer-events disabled so it never
+     intercepts the next hover/click. */
+  #analysis {
+    position: absolute;
+    z-index: 100;
+    background: rgba(20, 20, 28, 0.97);
+    color: var(--text);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 340px;
+    min-width: 220px;
+    pointer-events: none;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    white-space: normal;
+  }
+  #analysis.hidden { display: none; }
+  #analysis .a-title {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #analysis .a-pct {
+    font-family: "Courier New", monospace;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #0a0a12;
+  }
+  #analysis .a-section {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-dark);
+  }
+  #analysis .a-section:first-of-type {
+    border-top: none;
+    padding-top: 0;
+  }
+  #analysis .a-heading {
+    font-weight: bold;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    margin-bottom: 3px;
+  }
+  #analysis .a-eq {
+    font-family: "Courier New", monospace;
+    font-size: 11px;
+    color: #c8c8d8;
+    margin: 1px 0;
+  }
+  #analysis .a-summary {
+    font-size: 12px;
+    margin-top: 4px;
+  }
+  #analysis .a-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-dark);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  #analysis .a-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  #analysis .a-legend i {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    border: 1px solid currentColor;
+  }
+
   .n1 { color: #5fb3f7; }
   .n2 { color: #7ec97e; }
   .n3 { color: #f76c5f; }
@@ -238,9 +348,13 @@
       <button class="btn" id="insightBtn" aria-pressed="false">Insight: OFF</button>
     </div>
     <div class="help">
-      Left-click: reveal · Right-click / long-press: flag · Click number: chord reveal · Insight: heat-map unrevealed cells by mine probability
+      Left-click: reveal · Right-click / long-press: flag · Click number: chord reveal · Insight: heat-map unrevealed cells by mine probability · Hover a cell: see how its probability was calculated
     </div>
   </div>
+
+  <!-- Floating analysis panel — populated by JS, hidden by default.
+       Lives outside .game so absolute positioning uses viewport coords. -->
+  <div id="analysis" class="hidden" role="tooltip" aria-hidden="true"></div>
 
 <script>
 (() => {
@@ -572,13 +686,23 @@
   // This is the standard local-constraint solver used by Minesweeper
   // assistants. Subset-decomposition across components (a cell can sit
   // in two) gives the weighted combination automatically.
+  //
+  // Side-effect: also populates `analysisCache` — a Map keyed by
+  // unrevealed-cell index → list of component records that contributed
+  // to that cell's probability. Each record carries the constraint
+  // equations, vars, total configs, and configs where the cell was a
+  // mine. Used by the hover-analysis panel.
   const MAX_CONFIGS = 1 << 20;     // hard cap on enumerations per component
   const MAX_VARS    = 22;          // if a component touches more vars, skip it
+  let analysisCache = new Map();   // cellIdx -> [{componentId, ...}, ...]
+  let analysisCacheGlobalRate = 0; // populated alongside pMineCache
 
   function computeProbabilities() {
     const N = rows * cols;
     const out = new Float32Array(N);   // pMine per cell, default 0
     const weight = new Float32Array(N); // total weight (config counts) per cell
+    analysisCache = new Map();         // reset per solve
+
     if (gameOver) {
       // After win/lose the answer is known exactly; surface it so the
       // overlay reflects ground truth instead of stale probability.
@@ -586,6 +710,19 @@
         for (let c = 0; c < cols; c++) {
           const idx = r * cols + c;
           if (board[r][c] === 1) { out[idx] = 1; weight[idx] = 1; }
+        }
+      }
+      // For ground truth every cell is "determined" — fabricate an
+      // analysis record so the hover panel can say MINE / SAFE.
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const idx = r * cols + c;
+          if (revealed[r][c]) continue;
+          analysisCache.set(idx, [{
+            componentId: -1,
+            groundTruth: true,
+            isMine: board[r][c] === 1,
+          }]);
         }
       }
       pMineCache = out;
@@ -658,7 +795,8 @@
     }
 
     // 3. Enumerate configurations per component.
-    for (const comp of components) {
+    for (let ci = 0; ci < components.length; ci++) {
+      const comp = components[ci];
       const vars = comp.unknowns;
       const m = vars.length;
       if (m === 0) continue;
@@ -666,7 +804,7 @@
 
       // For each frontier cell, count (flags + mines among unknowns).
       // The constraint is: flags_in_8nb + mines_in_unknowns = adjacency.
-      const constraints = []; // [{ varsIdx: [indices into vars], need: int }]
+      const constraints = []; // [{ frontierIdx, vars: [indices into vars], need: int, flags: int }]
       for (const fIdx of comp.frontier) {
         const [fr, fc] = idxRC(fIdx);
         let flags = 0;
@@ -683,7 +821,12 @@
             }
           }
         }
-        constraints.push({ vars: involvedVars, need: adjacent[fr][fc] - flags });
+        constraints.push({
+          frontierIdx: fIdx,
+          vars: involvedVars,
+          need: adjacent[fr][fc] - flags,
+          flags,
+        });
       }
 
       // Enumerate all 2^m assignments. Filter to those satisfying every
@@ -714,6 +857,53 @@
         out[cellIdx]     += mineCountArr[v];
         weight[cellIdx]  += totalConfigs;
       }
+
+      // Build analysis records for every unknown in this component. We
+      // attach the full constraint list so the hover panel can display
+      // the equations without recomputing anything.
+      const flaggedInComp = [];
+      // Collect flagged cells that participate in this component's
+      // constraints (they reduce `need` and are part of the calculation).
+      for (const con of constraints) {
+        const [fr, fc] = idxRC(con.frontierIdx);
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = fr + dr, nc = fc + dc;
+            if (inBounds(nr, nc) && flagged[nr][nc]) {
+              flaggedInComp.push(idxOf(nr, nc));
+            }
+          }
+        }
+      }
+      const uniqueFlagged = Array.from(new Set(flaggedInComp));
+
+      const componentRecord = {
+        componentId: ci,
+        frontier: comp.frontier.slice(),   // constraint cell indices
+        unknowns: vars.slice(),            // unknown cell indices (includes subject)
+        flagged: uniqueFlagged,
+        constraints: constraints.map(con => ({
+          frontierIdx: con.frontierIdx,
+          vars: con.vars.slice(),
+          need: con.need,
+          flags: con.flags,
+        })),
+        totalConfigs,
+        capped: limit < (1 << m),
+        m,
+      };
+
+      for (let v = 0; v < m; v++) {
+        const cellIdx = vars[v];
+        if (!analysisCache.has(cellIdx)) analysisCache.set(cellIdx, []);
+        const arr = analysisCache.get(cellIdx);
+        arr.push({
+          ...componentRecord,
+          subjectVarIdx: v,
+          configsWithMine: mineCountArr[v],
+        });
+      }
     }
 
     // 4. Combine + global-rate fallback for cells outside any frontier.
@@ -727,12 +917,23 @@
     const globalRate = unrevealedTotal > 0
       ? Math.max(0, Math.min(1, remainingMines / unrevealedTotal))
       : 0;
+    analysisCacheGlobalRate = globalRate;
 
     for (let i = 0; i < N; i++) {
       if (weight[i] > 0) {
         out[i] = out[i] / weight[i];
       } else {
         out[i] = globalRate;
+        // Attach a global-rate record so the panel can explain it.
+        if (!revealed[Math.floor(i / cols)][i % cols]) {
+          if (!analysisCache.has(i)) analysisCache.set(i, []);
+          analysisCache.get(i).push({
+            componentId: -2,
+            globalRate: true,
+            remainingMines,
+            unrevealedTotal,
+          });
+        }
       }
     }
 
@@ -826,6 +1027,328 @@
   function invalidateInsight() {
     pMineDirty = true;
     if (showInsight) paintInsight();
+    // Analysis is keyed off the same solver state — any change invalidates
+    // the cached per-cell records. Clear the live panel so the user
+    // doesn't see stale numbers/highlights over a freshly-touched board.
+    clearAnalysis();
+  }
+
+  // ---------- Hover analysis ----------
+  // On pointermove over a cell, show a panel that explains how its
+  // P(mine) was computed and outline the contributing cells. Works
+  // whether or not Insight is ON — analysis is a separate UX layer
+  // powered by the same solver cache.
+  //
+  // State machine: only one analysis is "live" at a time. We track the
+  // subject cell index so redundant pointermoves inside the same cell
+  // don't trigger work, and we cleanly clear all DOM marks on
+  // pointerleave / state change.
+  let analysisEl = null;          // the floating panel
+  let analysisSubjectIdx = -1;    // cell index currently being analyzed
+  let analysisActive = false;     // whether marks are currently painted
+
+  function ensureSolverFresh() {
+    if (!pMineCache || pMineDirty) {
+      computeProbabilities();
+      pMineDirty = false;
+    }
+  }
+
+  function clearAnalysis() {
+    if (!analysisActive) return;
+    boardEl.classList.remove("analysis-active");
+    for (const cellEl of boardEl.children) {
+      cellEl.classList.remove(
+        "hover-subject", "hover-co", "hover-constraint", "hover-flag"
+      );
+    }
+    analysisActive = false;
+    analysisSubjectIdx = -1;
+    hidePanel();
+  }
+
+  function hidePanel() {
+    if (analysisEl) {
+      analysisEl.classList.add("hidden");
+      analysisEl.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  function positionPanel(anchorRect) {
+    if (!analysisEl) return;
+    const panelW = 320; // matches CSS min-width; will be refined by content
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Default: above the cell, left-aligned with the cell.
+    let left = anchorRect.left + anchorRect.width / 2 - panelW / 2;
+    let top  = anchorRect.top - margin - 4; // will be set below panel height
+
+    // Measure after content set.
+    analysisEl.style.left = "0px";
+    analysisEl.style.top  = "0px";
+    analysisEl.classList.remove("hidden");
+    const pr = analysisEl.getBoundingClientRect();
+    const ph = pr.height;
+
+    // Try above first; if it would clip the top, place below.
+    if (top - ph < 4) top = anchorRect.bottom + margin;
+    // Clamp horizontally to viewport with margin.
+    if (left < 4) left = 4;
+    if (left + pr.width > vw - 4) left = vw - pr.width - 4;
+    // Final clamp vertically (in case both above and below clip).
+    if (top + ph > vh - 4) top = vh - ph - 4;
+
+    analysisEl.style.left = left + "px";
+    analysisEl.style.top  = top + "px";
+  }
+
+  function idxToLabel(i) {
+    const r = Math.floor(i / cols) + 1;
+    const c = (i % cols) + 1;
+    return `(${r},${c})`;
+  }
+
+  // Build the human-readable analysis HTML for a cell. The solver
+  // already produced analysisCache for this cell — we just format it.
+  function buildAnalysis(r, c) {
+    const idx = r * cols + c;
+    const records = analysisCache.get(idx) || [];
+
+    // Case 1: game-over ground truth.
+    if (gameOver) {
+      const isMine = board[r][c] === 1;
+      return `
+        <div class="a-title">Cell ${idxToLabel(idx)}
+          <span class="a-pct" style="color:${isMine ? '#ff5555' : '#5fd7d7'}">
+            ${isMine ? 'MINE' : 'SAFE'}
+          </span>
+        </div>
+        <div class="a-section">
+          <div class="a-heading">Ground truth (game over)</div>
+          <div class="a-summary">${isMine
+            ? 'This cell contains a mine.'
+            : 'This cell does not contain a mine.'}</div>
+        </div>`;
+    }
+
+    // Case 2: cell is flagged — show flag-adjusted info.
+    if (flagged[r][c]) {
+      return `
+        <div class="a-title">Cell ${idxToLabel(idx)}
+          <span class="a-pct">flagged</span>
+        </div>
+        <div class="a-section">
+          <div class="a-heading">Flag</div>
+          <div class="a-summary">You placed a flag here. Flagged cells are
+            treated as mines by the solver (they reduce the <code>need</code>
+            on adjacent constraint cells).</div>
+        </div>`;
+    }
+
+    // Case 3: cell is revealed — shouldn't normally get here, but be safe.
+    if (revealed[r][c]) {
+      return `
+        <div class="a-title">Cell ${idxToLabel(idx)}
+          <span class="a-pct">revealed</span>
+        </div>
+        <div class="a-section">
+          <div class="a-summary">This cell is already revealed — it
+            contributes constraints to neighboring cells.</div>
+        </div>`;
+    }
+
+    // Case 4: subject cell, with analysis records from solver.
+    const p = pMineCache[idx];
+    const pct = (p * 100).toFixed(1);
+    let sections = "";
+
+    // Per-component breakdown.
+    const realRecords = records.filter(rec => !rec.globalRate);
+    const globalRec  = records.find(rec => rec.globalRate);
+
+    if (realRecords.length === 0) {
+      // Cell uses global rate — no local constraints.
+      sections += `
+        <div class="a-section">
+          <div class="a-heading">Global rate fallback</div>
+          <div class="a-summary">No frontier constraint cells touch this
+            cell, so the solver has no local information. Using the
+            global rate instead:</div>
+          <div class="a-eq">remaining mines = ${globalRec.remainingMines}</div>
+          <div class="a-eq">unrevealed cells = ${globalRec.unrevealedTotal}</div>
+          <div class="a-eq">P(mine) = ${globalRec.remainingMines} / ${globalRec.unrevealedTotal}
+            = ${(p * 100).toFixed(1)}%</div>
+        </div>`;
+    } else {
+      for (const rec of realRecords) {
+        const subjIsMine = rec.configsWithMine;
+        const total = rec.totalConfigs;
+        const subjProb = total > 0 ? (subjIsMine / total) : 0;
+
+        sections += `<div class="a-section">`;
+        sections += `<div class="a-heading">Component ${rec.componentId + 1}
+          — ${rec.m} unknowns · ${rec.constraints.length} constraints</div>`;
+
+        // Constraint equations.
+        for (const con of rec.constraints) {
+          const flabel = idxToLabel(con.frontierIdx);
+          const adjVal = con.need + con.flags;
+          if (con.vars.length === 0) {
+            sections += `<div class="a-eq">cell${flabel}=${adjVal}: all
+              ${con.flags} mine-nbhd already accounted for by flags</div>`;
+            continue;
+          }
+          const varLabels = con.vars
+            .map(v => {
+              const ci = rec.unknowns[v];
+              return ci === idx ? "<b>you</b>" : idxToLabel(ci);
+            })
+            .join(" + ");
+          const tail = con.flags > 0 ? ` + ${con.flags} flag` : "";
+          sections += `<div class="a-eq">cell${flabel}=${adjVal}:
+            ${varLabels}${tail} = ${con.need}</div>`;
+        }
+
+        sections += `<div class="a-summary">
+          <b>${total.toLocaleString()}</b> valid placements
+          ${rec.capped ? "(capped at 2²⁰)" : ""},
+          <b>${subjIsMine.toLocaleString()}</b> place a mine here
+          → component P(mine) = ${(subjProb * 100).toFixed(1)}%.</div>`;
+
+        sections += `</div>`;
+      }
+
+      // If we have local AND global, explain the combination.
+      if (globalRec) {
+        sections += `<div class="a-section">
+          <div class="a-heading">Combined</div>
+          <div class="a-summary">Weighted average of component probabilities
+            and global rate (cells outside the components add the global
+            rate as a separate sample). Final P(mine) = ${pct}%.</div>
+        </div>`;
+      }
+    }
+
+    // Legend explaining the highlight colors.
+    const legend = `
+      <div class="a-legend">
+        <span><i style="background:#ffd866;color:#ffd866"></i> subject</span>
+        <span><i style="background:#5fd7d7;color:#5fd7d7"></i> co-unknown</span>
+        <span><i style="background:transparent;color:#f7a05f;border-style:dashed"></i> constraint</span>
+        <span><i style="background:transparent;color:#ff5555;border-style:dotted"></i> flag</span>
+      </div>`;
+
+    return `
+      <div class="a-title">Cell ${idxToLabel(idx)}
+        <span class="a-pct">${pct}%</span>
+      </div>
+      ${sections}
+      ${legend}`;
+  }
+
+  // Collect cell indices that need highlighting for the current subject.
+  // Returns { subject, co: Set, constraint: Set, flag: Set }.
+  function computeHighlightSets(subjectIdx) {
+    const co = new Set();
+    const constraint = new Set();
+    const flag = new Set();
+    const records = analysisCache.get(subjectIdx) || [];
+    for (const rec of records) {
+      if (rec.globalRate) continue;
+      for (const f of rec.flagged) flag.add(f);
+      for (const ci of rec.frontier) constraint.add(ci);
+      for (const ci of rec.unknowns) {
+        if (ci !== subjectIdx) co.add(ci);
+      }
+    }
+    return { subject: subjectIdx, co, constraint, flag };
+  }
+
+  function applyHighlights(sets) {
+    // Add the board-level gate class first so the CSS rules activate.
+    boardEl.classList.add("analysis-active");
+    for (const ci of sets.co) {
+      const el = boardEl.children[ci];
+      if (el) el.classList.add("hover-co");
+    }
+    for (const ci of sets.constraint) {
+      const el = boardEl.children[ci];
+      if (el) el.classList.add("hover-constraint");
+    }
+    for (const ci of sets.flag) {
+      const el = boardEl.children[ci];
+      if (el) el.classList.add("hover-flag");
+    }
+    const subjEl = boardEl.children[sets.subject];
+    if (subjEl) subjEl.classList.add("hover-subject");
+    analysisActive = true;
+  }
+
+  function showAnalysisForCell(r, c, anchorEl) {
+    const idx = r * cols + c;
+    // Only analyze unrevealed unflagged cells (the ones with a probability).
+    // Revealed/flagged cells get a brief explanatory panel but no highlights.
+    const canAnalyze = !revealed[r][c];
+
+    ensureSolverFresh();
+
+    // Update panel content.
+    if (!analysisEl) return;
+    analysisEl.innerHTML = buildAnalysis(r, c);
+    analysisEl.setAttribute("aria-hidden", "false");
+    positionPanel(anchorEl.getBoundingClientRect());
+
+    // Clear any prior highlights, then apply new ones if applicable.
+    if (analysisActive) {
+      for (const cellEl of boardEl.children) {
+        cellEl.classList.remove(
+          "hover-subject", "hover-co", "hover-constraint", "hover-flag"
+        );
+      }
+    }
+
+    if (!canAnalyze) {
+      boardEl.classList.remove("analysis-active");
+      analysisActive = false;
+      // Still highlight the subject briefly with the gold ring so user
+      // sees which cell the panel refers to.
+      const subjEl = boardEl.children[idx];
+      if (subjEl) {
+        boardEl.classList.add("analysis-active");
+        subjEl.classList.add("hover-subject");
+        analysisActive = true;
+      }
+      analysisSubjectIdx = idx;
+      return;
+    }
+
+    const sets = computeHighlightSets(idx);
+    applyHighlights(sets);
+    analysisSubjectIdx = idx;
+  }
+
+  function handleHover(e) {
+    const target = e.target.closest(".cell");
+    if (!target) return;
+    const r = +target.dataset.r;
+    const c = +target.dataset.c;
+    const idx = r * cols + c;
+
+    // Redundant move inside same cell: keep panel positioned with cursor
+    // (so it follows if user moves the mouse within the cell) but skip
+    // the recompute.
+    if (idx === analysisSubjectIdx && analysisActive) {
+      // We still re-position so panel doesn't drift if user moves.
+      // Position is anchored to cell, not cursor, so no work needed.
+      return;
+    }
+    showAnalysisForCell(r, c, target);
+  }
+
+  function handleLeave() {
+    clearAnalysis();
   }
 
   // ---------- Difficulty buttons ----------
@@ -880,6 +1403,7 @@
   timerEl       = document.getElementById("timer");
   faceEl        = document.getElementById("face");
   insightBtnEl  = document.getElementById("insightBtn");
+  analysisEl    = document.getElementById("analysis");
   faceEl.addEventListener("click", () => newGame());
   insightBtnEl.addEventListener("click", () => setInsight(!showInsight));
 
@@ -910,11 +1434,18 @@
   boardEl.addEventListener("pointerleave", () => {
     clearTimeout(longPressTimer);
     clearPressed();
+    clearAnalysis();
   });
 
-  // Keyboard: R = reset
+  // Hover analysis: pointermove updates panel + highlights; leaves clear.
+  // We track the subject cell so redundant moves inside the same cell
+  // don't trigger recomputation.
+  boardEl.addEventListener("pointermove", handleHover);
+
+  // Keyboard: R = reset, Esc = dismiss analysis
   document.addEventListener("keydown", e => {
     if (e.key === "r" || e.key === "R") newGame();
+    else if (e.key === "Escape") clearAnalysis();
   });
 
   buildDifficultyBar();
