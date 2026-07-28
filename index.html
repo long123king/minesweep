@@ -181,38 +181,40 @@
     z-index: 2;
   }
 
-  /* Analysis panel — docked beside the board (no longer floating). Always
-     present in the layout flow so the board stays unobscured. Shows a
-     discoverable placeholder when no cell is hovered; live-updates with
-     math + per-component breakdown during hover. */
-  .game-body {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 12px;
-  }
+  /* Analysis panel — absolutely positioned beside the board. It lives
+     outside .game's layout flow entirely, so the board's position
+     and size stay exactly the same whether the panel is empty, in
+     placeholder mode, or showing live math. Anchored to .board-wrap
+     (which is position:relative). */
   .board-wrap {
-    /* Sized by its child board grid; flex-shrink:0 keeps it intact. */
+    position: relative;       /* anchor for absolute child */
     flex: 0 0 auto;
+    width: max-content;
   }
   .analysis-panel {
-    flex: 0 0 280px;
-    min-width: 240px;
-    max-height: calc(var(--cell-size) * 16 + 32px); /* match board vertical extent */
+    position: absolute;
+    top: 0;
+    left: 100%;
+    margin-left: 12px;
+    width: 280px;
+    /* Match the tallest possible board (16 rows × 32px + border/padding).
+       Any taller content scrolls inside the panel. */
+    max-height: calc(var(--cell-size) * 16 + 24px);
     overflow-y: auto;
     background: var(--panel);
     border: 1px solid var(--border-light);
     border-radius: 4px;
-    padding: 10px 12px;
+    padding: 12px 14px;
     font-size: 12px;
     line-height: 1.5;
     color: var(--text);
     box-sizing: border-box;
+    z-index: 10;
   }
   .analysis-panel .ap-empty {
     color: var(--text-dim);
     text-align: center;
-    padding: 24px 8px;
+    padding: 20px 4px;
   }
   .analysis-panel .ap-empty-title {
     font-size: 14px;
@@ -224,65 +226,57 @@
     font-size: 11px;
     line-height: 1.4;
   }
-  .analysis-panel .a-title {
-    font-size: 13px;
-    font-weight: bold;
-    margin-bottom: 6px;
+  /* Simplified analysis layout — hero number + plain-English reason. */
+  .analysis-panel .ap-hero {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    align-items: baseline;
+    gap: 10px;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--border-dark);
   }
-  .analysis-panel .a-pct {
-    font-family: "Courier New", monospace;
-    font-size: 14px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: #0a0a12;
-  }
-  .analysis-panel .a-section {
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px solid var(--border-dark);
-  }
-  .analysis-panel .a-section:first-of-type {
-    border-top: none;
-    padding-top: 0;
-  }
-  .analysis-panel .a-heading {
-    font-weight: bold;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 0.5px;
-    margin-bottom: 3px;
-  }
-  .analysis-panel .a-eq {
-    font-family: "Courier New", monospace;
-    font-size: 11px;
-    color: #c8c8d8;
-    margin: 1px 0;
-    word-break: break-word;
-  }
-  .analysis-panel .a-summary {
+  .analysis-panel .ap-cell {
     font-size: 12px;
-    margin-top: 4px;
+    color: var(--text-dim);
+    font-family: "Courier New", monospace;
   }
-  .analysis-panel .a-legend {
+  .analysis-panel .ap-pct {
+    font-family: "Courier New", monospace;
+    font-size: 28px;
+    font-weight: bold;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: #0a0a12;
+    margin-left: auto;
+  }
+  .analysis-panel .ap-reason {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text);
+  }
+  .analysis-panel .ap-stats {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-dark);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .analysis-panel .ap-legend {
     display: flex;
     flex-wrap: wrap;
     gap: 6px 12px;
-    margin-top: 6px;
-    padding-top: 6px;
+    margin-top: 10px;
+    padding-top: 8px;
     border-top: 1px solid var(--border-dark);
     font-size: 10px;
     color: var(--text-dim);
   }
-  .analysis-panel .a-legend span {
+  .analysis-panel .ap-legend span {
     display: inline-flex;
     align-items: center;
     gap: 4px;
   }
-  .analysis-panel .a-legend i {
+  .analysis-panel .ap-legend i {
     display: inline-block;
     width: 10px;
     height: 10px;
@@ -290,15 +284,16 @@
     border: 1px solid currentColor;
   }
 
-  /* On narrow screens stack the panel below the board. */
+  /* On narrow viewports, drop the panel below the board instead of
+     beside it. Still absolutely positioned so it doesn't affect the
+     board's layout. */
   @media (max-width: 720px) {
-    .game-body {
-      flex-direction: column;
-      align-items: center;
-    }
     .analysis-panel {
-      flex: 0 0 auto;
-      width: calc(var(--cell-size) * 9 + 8px);
+      top: 100%;
+      left: 0;
+      margin-top: 12px;
+      margin-left: 0;
+      width: calc(var(--cell-size) * 9 + 12px);
       max-width: 100%;
       max-height: 220px;
     }
@@ -358,6 +353,7 @@
     font-size: 11px;
     text-align: center;
     line-height: 1.5;
+    max-width: 480px;
   }
 
   /* small screens */
@@ -379,18 +375,17 @@
       <button class="face" id="face" title="New game">🙂</button>
       <div class="display" id="timer">000</div>
     </div>
-    <div class="game-body">
-      <div class="board-wrap">
-        <div class="board" id="board"></div>
-      </div>
-      <!-- Docked analysis panel — lives next to the board, in flow.
-           Shows a discoverable placeholder until the user hovers a cell,
-           then live-updates with the math behind that cell's probability.
-           No longer floats over the board, so highlights stay visible. -->
+    <div class="board-wrap">
+      <div class="board" id="board"></div>
+      <!-- Analysis panel — absolutely positioned beside the board. It is
+           NOT in the document flow that sizes .game, so the board's
+           position and size stay exactly the same whether the panel is
+           empty, showing placeholder, or showing live math. Anchored to
+           .board-wrap (which is position:relative). -->
       <aside class="analysis-panel" id="analysis" aria-live="polite">
         <div class="ap-empty">
           <div class="ap-empty-title">Hover a cell</div>
-          <div class="ap-empty-body">to see how its mine probability was calculated</div>
+          <div class="ap-empty-body">to see its mine probability</div>
         </div>
       </aside>
     </div>
@@ -1122,143 +1117,180 @@
   const PLACEHOLDER_HTML =
     '<div class="ap-empty">' +
       '<div class="ap-empty-title">Hover a cell</div>' +
-      '<div class="ap-empty-body">to see how its mine probability was calculated</div>' +
+      '<div class="ap-empty-body">to see its mine probability</div>' +
     '</div>';
 
   function showPlaceholder() {
     if (analysisEl) analysisEl.innerHTML = PLACEHOLDER_HTML;
   }
 
+  // Format a cell index as a friendly "(row,col)" label, 1-indexed.
   function idxToLabel(i) {
     const r = Math.floor(i / cols) + 1;
     const c = (i % cols) + 1;
     return `(${r},${c})`;
   }
 
-  // Build the human-readable analysis HTML for a cell. The solver
-  // already produced analysisCache for this cell — we just format it.
+  // Format a probability as a CSS color matching the heat gradient.
+  // 0 → cool blue, 0.5 → neutral, 1 → hot red.
+  function pctColor(p) {
+    if (p < 0.34) return '#5fb3f7';  // cool
+    if (p < 0.67) return '#c8c8d8';  // neutral
+    return '#f76c5f';                 // hot
+  }
+
+  // Format a small int as "N mines" / "1 mine" / "0 mines".
+  function plural(n, singular, plural) {
+    return n === 1 ? `1 ${singular}` : `${n} ${plural || singular + 's'}`;
+  }
+
+  // Plain-English reasoning generators. One sentence per scenario.
+  // We pick the most informative reasoning that fits the data.
+
+  function reasonForced(records, idx) {
+    // 100% or 0%: a single constraint forces this cell.
+    // Find the smallest, cleanest such constraint and explain it.
+    for (const rec of records) {
+      for (const con of rec.constraints) {
+        if (!con.vars.includes(rec.subjectVarIdx)) continue;
+        if (con.vars.length !== 1) continue; // only single-unknown constraints
+        if (con.need !== 0 && con.need !== 1) continue;
+        const fLabel = idxToLabel(con.frontierIdx);
+        const num = con.need + con.flags;
+        if (con.need === 1) {
+          return `The ${num} at ${fLabel} has no other unrevealed neighbors — its mine count must come from you, so you are a mine.`;
+        }
+        if (con.need === 0 && con.flags === 0) {
+          return `The ${num} at ${fLabel} has its mine count already satisfied by other neighbors — you are safe.`;
+        }
+        if (con.need === 0 && con.flags > 0) {
+          return `The ${num} at ${fLabel} has its ${plural(con.flags, 'flag')} counting toward the total — no mine needed here, you are safe.`;
+        }
+      }
+    }
+    return null;
+  }
+
+  function reasonPartial(rec) {
+    // Partial probability: a constraint bounds this cell.
+    const total = rec.totalConfigs;
+    const mine = rec.configsWithMine;
+    const m = rec.m;
+    const k = rec.constraints.length;
+    // Find the most relevant constraint (one that involves this cell).
+    const myConstraint = rec.constraints.find(con => con.vars.includes(rec.subjectVarIdx));
+    if (myConstraint) {
+      const fLabel = idxToLabel(myConstraint.frontierIdx);
+      const num = myConstraint.need + myConstraint.flags;
+      const siblings = myConstraint.vars.length - 1;
+      if (mine === 0) {
+        return `The ${num} at ${fLabel} touches ${siblings} other unrevealed cells. Across all consistent placements of mines among these cells, none lands on you.`;
+      }
+      if (mine === total) {
+        return `The ${num} at ${fLabel} touches ${siblings} other unrevealed cells. In every consistent placement, a mine lands on you.`;
+      }
+      return `Of ${total.toLocaleString()} ways to place mines consistent with the surrounding numbers, ${mine.toLocaleString()} put a mine here — and ${siblings} other unrevealed cells share in this calculation.`;
+    }
+    return `Of ${total.toLocaleString()} consistent mine placements across ${m} unknown cells and ${k} constraint cells, ${mine.toLocaleString()} place a mine here.`;
+  }
+
+  function reasonGlobal(globalRec) {
+    const m = globalRec.remainingMines;
+    const u = globalRec.unrevealedTotal;
+    if (u <= 0) return `No nearby number cells touch you. The board is fully revealed.`;
+    const pct = (m / u * 100).toFixed(0);
+    return `No nearby number cells touch you, so there's no local information. The remaining board has roughly ${plural(m, 'mine')} among ${u} unrevealed cells — about ${pct}% on average.`;
+  }
+
+  function totalConstraintCount(records) {
+    let n = 0;
+    for (const rec of records) n += rec.constraints.length;
+    return n;
+  }
+
+  function totalUnknownCount(records) {
+    let n = 0;
+    for (const rec of records) n += rec.m;
+    return n;
+  }
+
+  // Build the simple analysis panel content. Returns innerHTML.
+  // Layout: hero (cell + percentage), plain-English reason, compact
+  // stats, legend.
   function buildAnalysis(r, c) {
     const idx = r * cols + c;
     const records = analysisCache.get(idx) || [];
+    const cellLabel = idxToLabel(idx);
 
-    // Case 1: game-over ground truth.
+    // Case 1: game over → ground truth.
     if (gameOver) {
       const isMine = board[r][c] === 1;
+      const pctText = isMine ? 'MINE' : 'SAFE';
+      const pctColorVal = isMine ? '#ff5555' : '#5fb3f7';
+      const reason = isMine
+        ? `Game over — this cell contains a mine.`
+        : `Game over — this cell is safe.`;
       return `
-        <div class="a-title">Cell ${idxToLabel(idx)}
-          <span class="a-pct" style="color:${isMine ? '#ff5555' : '#5fd7d7'}">
-            ${isMine ? 'MINE' : 'SAFE'}
-          </span>
+        <div class="ap-hero">
+          <span class="ap-cell">Cell ${cellLabel}</span>
+          <span class="ap-pct" style="color:${pctColorVal}">${pctText}</span>
         </div>
-        <div class="a-section">
-          <div class="a-heading">Ground truth (game over)</div>
-          <div class="a-summary">${isMine
-            ? 'This cell contains a mine.'
-            : 'This cell does not contain a mine.'}</div>
-        </div>`;
+        <div class="ap-reason">${reason}</div>`;
     }
 
-    // Case 2: cell is flagged — show flag-adjusted info.
+    // Case 2: flagged.
     if (flagged[r][c]) {
       return `
-        <div class="a-title">Cell ${idxToLabel(idx)}
-          <span class="a-pct">flagged</span>
+        <div class="ap-hero">
+          <span class="ap-cell">Cell ${cellLabel}</span>
+          <span class="ap-pct" style="color:#ff5555">FLAG</span>
         </div>
-        <div class="a-section">
-          <div class="a-heading">Flag</div>
-          <div class="a-summary">You placed a flag here. Flagged cells are
-            treated as mines by the solver (they reduce the <code>need</code>
-            on adjacent constraint cells).</div>
-        </div>`;
+        <div class="ap-reason">You've marked this as a mine. The solver treats it as one when working out probabilities for other cells.</div>`;
     }
 
-    // Case 3: cell is revealed — shouldn't normally get here, but be safe.
+    // Case 3: revealed.
     if (revealed[r][c]) {
+      const adj = adjacent[r][c];
+      const reason = adj === 0
+        ? `Revealed cell — no adjacent mines. It contributes zero information about neighbors beyond being empty.`
+        : `Revealed ${adj} — this cell's number is one of the constraints that determines probabilities for its unrevealed neighbors (highlighted in orange when you hover them).`;
       return `
-        <div class="a-title">Cell ${idxToLabel(idx)}
-          <span class="a-pct">revealed</span>
+        <div class="ap-hero">
+          <span class="ap-cell">Cell ${cellLabel}</span>
+          <span class="ap-pct" style="color:#9090a8">${adj}</span>
         </div>
-        <div class="a-section">
-          <div class="a-summary">This cell is already revealed — it
-            contributes constraints to neighboring cells.</div>
-        </div>`;
+        <div class="ap-reason">${reason}</div>`;
     }
 
-    // Case 4: subject cell, with analysis records from solver.
+    // Case 4: active analysis.
     const p = pMineCache[idx];
     const pct = (p * 100).toFixed(1);
-    let sections = "";
+    const pColor = pctColor(p);
 
-    // Per-component breakdown.
     const realRecords = records.filter(rec => !rec.globalRate);
     const globalRec  = records.find(rec => rec.globalRate);
 
+    let reason;
     if (realRecords.length === 0) {
-      // Cell uses global rate — no local constraints.
-      sections += `
-        <div class="a-section">
-          <div class="a-heading">Global rate fallback</div>
-          <div class="a-summary">No frontier constraint cells touch this
-            cell, so the solver has no local information. Using the
-            global rate instead:</div>
-          <div class="a-eq">remaining mines = ${globalRec.remainingMines}</div>
-          <div class="a-eq">unrevealed cells = ${globalRec.unrevealedTotal}</div>
-          <div class="a-eq">P(mine) = ${globalRec.remainingMines} / ${globalRec.unrevealedTotal}
-            = ${(p * 100).toFixed(1)}%</div>
-        </div>`;
+      reason = reasonGlobal(globalRec);
     } else {
-      for (const rec of realRecords) {
-        const subjIsMine = rec.configsWithMine;
-        const total = rec.totalConfigs;
-        const subjProb = total > 0 ? (subjIsMine / total) : 0;
-
-        sections += `<div class="a-section">`;
-        sections += `<div class="a-heading">Component ${rec.componentId + 1}
-          — ${rec.m} unknowns · ${rec.constraints.length} constraints</div>`;
-
-        // Constraint equations.
-        for (const con of rec.constraints) {
-          const flabel = idxToLabel(con.frontierIdx);
-          const adjVal = con.need + con.flags;
-          if (con.vars.length === 0) {
-            sections += `<div class="a-eq">cell${flabel}=${adjVal}: all
-              ${con.flags} mine-nbhd already accounted for by flags</div>`;
-            continue;
-          }
-          const varLabels = con.vars
-            .map(v => {
-              const ci = rec.unknowns[v];
-              return ci === idx ? "<b>you</b>" : idxToLabel(ci);
-            })
-            .join(" + ");
-          const tail = con.flags > 0 ? ` + ${con.flags} flag` : "";
-          sections += `<div class="a-eq">cell${flabel}=${adjVal}:
-            ${varLabels}${tail} = ${con.need}</div>`;
-        }
-
-        sections += `<div class="a-summary">
-          <b>${total.toLocaleString()}</b> valid placements
-          ${rec.capped ? "(capped at 2²⁰)" : ""},
-          <b>${subjIsMine.toLocaleString()}</b> place a mine here
-          → component P(mine) = ${(subjProb * 100).toFixed(1)}%.</div>`;
-
-        sections += `</div>`;
-      }
-
-      // If we have local AND global, explain the combination.
-      if (globalRec) {
-        sections += `<div class="a-section">
-          <div class="a-heading">Combined</div>
-          <div class="a-summary">Weighted average of component probabilities
-            and global rate (cells outside the components add the global
-            rate as a separate sample). Final P(mine) = ${pct}%.</div>
-        </div>`;
+      // Try forced first (0% / 100%); fall back to partial.
+      reason = reasonForced(realRecords, idx);
+      if (!reason) {
+        // Combine reasons from all components, weighted.
+        reason = realRecords.map(rec => reasonPartial(rec)).join(' ');
       }
     }
 
-    // Legend explaining the highlight colors.
+    const totalUnk = totalUnknownCount(realRecords);
+    const totalCon = totalConstraintCount(realRecords);
+
+    const stats = realRecords.length > 0
+      ? `<div class="ap-stats">${totalUnk} unknown cells · ${totalCon} constraint equations · ${realRecords.length} solver region${realRecords.length > 1 ? 's' : ''}</div>`
+      : `<div class="ap-stats">No local constraints — using global rate only</div>`;
+
     const legend = `
-      <div class="a-legend">
+      <div class="ap-legend">
         <span><i style="background:#ffd866;color:#ffd866"></i> subject</span>
         <span><i style="background:#5fd7d7;color:#5fd7d7"></i> co-unknown</span>
         <span><i style="background:transparent;color:#f7a05f;border-style:dashed"></i> constraint</span>
@@ -1266,13 +1298,17 @@
       </div>`;
 
     return `
-      <div class="a-title">Cell ${idxToLabel(idx)}
-        <span class="a-pct">${pct}%</span>
+      <div class="ap-hero">
+        <span class="ap-cell">Cell ${cellLabel}</span>
+        <span class="ap-pct" style="color:${pColor}">${pct}%</span>
       </div>
-      ${sections}
+      <div class="ap-reason">${reason}</div>
+      ${stats}
       ${legend}`;
   }
 
+  // Build the human-readable analysis HTML for a cell. The solver
+  // already produced analysisCache for this cell — we just format it.
   // Collect cell indices that need highlighting for the current subject.
   // Returns { subject, co: Set, constraint: Set, flag: Set }.
   function computeHighlightSets(subjectIdx) {
