@@ -1091,21 +1091,70 @@
     }
 
     if (!usedBruteForce) {
-      // Fallback: combine component results + global rate for cells outside any frontier.
+      // Fallback path: combine component-local enumeration results with a
+      // GLOBAL-mine-count correction. The component solver alone ignores
+      // the global constraint (total mines left in the whole board), so
+      // far cells get a wildly wrong "remaining/unrevealed" rate and
+      // in-component cells can be biased too. Correcting this matters
+      // most on Intermediate/Expert where brute force never fits.
+      //
+      // Step 1: sum expected in-component mines from the local solver.
+      let inComponentExpectedMines = 0;
+      let inComponentCellCount = 0;
       for (let i = 0; i < N; i++) {
+        if (!revealed[Math.floor(i / cols)][i % cols] && !flagged[Math.floor(i / cols)][i % cols] && weight[i] > 0) {
+          inComponentExpectedMines += out[i];
+          inComponentCellCount++;
+        }
+      }
+      // Far cells: unrevealed-unflagged AND not in any component.
+      let farCellCount = 0;
+      let farCellExpectedMines = 0;
+      if (inComponentCellCount > 0) {
+        // Subtract expected mines consumed by components from the global budget.
+        farCellExpectedMines = Math.max(0, remainingMines - inComponentExpectedMines);
+        farCellCount = unrevealedTotal - inComponentCellCount;
+      } else {
+        farCellExpectedMines = remainingMines;
+        farCellCount = unrevealedTotal;
+      }
+      const farRate = farCellCount > 0 ? farCellExpectedMines / farCellCount : 0;
+
+      // Step 2: optional component-cell scaling. If the local solver
+      // summed to MORE mines than the global budget allows, scale each
+      // in-component cell's P down proportionally so the sum matches.
+      // This is the "renormalize" trick used by lightweight Minesweeper
+      // solvers when full joint enumeration isn't feasible.
+      let scaleFactor = 1.0;
+      if (inComponentExpectedMines > remainingMines && inComponentExpectedMines > 0) {
+        scaleFactor = remainingMines / inComponentExpectedMines;
+      }
+
+      // Step 3: write final probabilities.
+      for (let i = 0; i < N; i++) {
+        const r = Math.floor(i / cols), c = i % cols;
+        if (revealed[r][c] || flagged[r][c]) continue;
         if (weight[i] > 0) {
-          out[i] = out[i] / weight[i];
+          // In a solved component — divide mine count by total weight to
+          // get the local P, then apply scaling if the global budget
+          // was tight. (The clamping handles numerical edge cases.)
+          out[i] = Math.max(0, Math.min(1, (out[i] / weight[i]) * scaleFactor));
         } else {
-          out[i] = globalRate;
-          if (!revealed[Math.floor(i / cols)][i % cols]) {
-            if (!analysisCache.has(i)) analysisCache.set(i, []);
-            analysisCache.get(i).push({
-              componentId: -2,
-              globalRate: true,
-              remainingMines,
-              unrevealedTotal,
-            });
-          }
+          // Far cell — adjusted rate based on remaining mines after
+          // component contributions are accounted for.
+          out[i] = farRate;
+          if (!analysisCache.has(i)) analysisCache.set(i, []);
+          analysisCache.get(i).push({
+            componentId: -2,
+            globalRate: true,
+            remainingMines,
+            unrevealedTotal,
+            inComponentExpectedMines,
+            inComponentCellCount,
+            farCellCount,
+            farCellExpectedMines,
+            scaleFactor,
+          });
         }
       }
     }
@@ -1329,6 +1378,22 @@
     const m = globalRec.remainingMines;
     const u = globalRec.unrevealedTotal;
     if (u <= 0) return `No nearby number cells touch you. The board is fully revealed.`;
+    // New global-rate records carry the post-component-adjusted numbers.
+    if (globalRec.inComponentCellCount !== undefined && globalRec.farCellCount !== undefined) {
+      const farM = globalRec.farCellExpectedMines;
+      const farN = globalRec.farCellCount;
+      if (farN <= 0) {
+        // Far cells form an empty set — every unrevealed cell is in a component.
+        return `No nearby number cells touch you, so this is set entirely by component constraints.`;
+      }
+      const pct = (farM / farN * 100).toFixed(1);
+      const inExp = globalRec.inComponentExpectedMines;
+      const inN = globalRec.inComponentCellCount;
+      const sf = globalRec.scaleFactor;
+      const scaleNote = sf < 1 ? ` (component probabilities scaled by ${(sf * 100).toFixed(0)}% to fit the global mine budget)` : '';
+      return `No nearby number cells touch you. Solver components across the board expect ~${inExp.toFixed(1)} mines among ${inN} constrained cells${scaleNote}. That leaves about ${plural(Math.round(farM), 'mine')} for ${plural(farN, 'far unrevealed cell')} — about ${pct}% on average.`;
+    }
+    // Legacy fallback (no adjustment info).
     const pct = (m / u * 100).toFixed(0);
     return `No nearby number cells touch you, so there's no local information. The remaining board has roughly ${plural(m, 'mine')} among ${u} unrevealed cells — about ${pct}% on average.`;
   }
