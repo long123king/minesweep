@@ -920,7 +920,6 @@
     // enumeration below skips any cell already known to be a mine or safe.
     const knownMine = new Uint8Array(N);
     const knownSafe = new Uint8Array(N);
-    for (const ci of 0) {} // placeholder
     // Build (clue, varIndices, need) before we mutate the constraint list.
     // Constraint normalization: convert "flags + unknowns = adjacency" to
     // "remaining mines among unknowns" by subtracting flags.
