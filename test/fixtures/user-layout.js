@@ -43,19 +43,33 @@ for (let i = 0; i < 81; i++) if (cells[i].state === 'hidden') hiddenIdx.push(i);
 const F = hiddenIdx.length;
 let valid = 0;
 const mineCount = new Float64Array(81);
-for (let bits = 0; bits < (1 << F); bits++) {
-  if (popcount(bits) !== 10) continue;
-  const mineSet = new Set();
-  for (let b = 0; b < F; b++) if (bits & (1 << b)) mineSet.add(hiddenIdx[b]);
-  let ok = true;
-  for (const cl of clues) {
-    let s = 0;
-    for (const n of cl.hidden) if (mineSet.has(n)) s++;
-    if (s !== cl.number) { ok = false; break; }
+const expected = new Float64Array(81);
+// Enumerate combinations of size totalMines.
+function recurse(start, picked, depth) {
+  if (depth === 10) {
+    const mineSet = new Set();
+    for (let k = 0; k < picked.length; k++) mineSet.add(picked[k]);
+    for (const cl of clues) {
+      let s = 0;
+      for (const n of cl.hidden) if (mineSet.has(n)) s++;
+      if (s !== cl.number) return;
+    }
+    valid++;
+    for (const i of mineSet) mineCount[i]++;
+    for (let i = 0; i < 81; i++) {
+      if (cells[i].state === 'hidden' && !mineSet.has(i)) expected[i]++;
+    }
+    return;
   }
-  if (!ok) continue;
-  valid++;
-  for (const i of mineSet) mineCount[i]++;
+  const need = 10 - depth;
+  for (let i = start; i <= F - need; i++) {
+    picked[depth] = hiddenIdx[i];
+    recurse(i + 1, picked, depth + 1);
+  }
+}
+recurse(0, new Array(10), 0);
+for (let i = 0; i < 81; i++) {
+  if (cells[i].state === 'hidden') expected[i] = (valid ? expected[i] / valid : 0);
 }
 console.log('valid configs:', valid);
 console.log('probabilities (0-indexed row-major):');

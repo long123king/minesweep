@@ -43,27 +43,37 @@
     }
 
     const constraints = baseConstraints.map(c => ({
-      vars: c.vars.filter(v => !knownMines.has(v) && !knownSafe.has(v)).slice(),
+      vars: c.vars.slice(),
       need: c.need,
       clue: c.clue,
-    })).filter(c => c.vars.length > 0);
+    }));
 
     let changed = true;
     while (changed) {
       changed = false;
       for (const con of constraints) {
-        if (con.need < 0 || con.need > con.vars.length) continue;
-        if (con.need === 0) {
-          for (const v of con.vars) if (!knownSafe.has(v)) { knownSafe.add(v); changed = true; }
+        // Compute live vars inline; do NOT mutate con.vars. The original
+        // con.vars is needed so the effective-need computation can count
+        // cells that became forced into this constraint after the last
+        // iteration.
+        const live = con.vars.filter(v => !knownMines.has(v) && !knownSafe.has(v));
+        const forced = con.vars.length - live.length;
+        const effNeed = con.need - forced;
+        if (live.length === 0) continue;
+        if (effNeed < 0 || effNeed > live.length) continue;
+        if (effNeed === 0) {
+          for (const v of live) if (!knownSafe.has(v)) { knownSafe.add(v); changed = true; }
           con.vars = [];
-        } else if (con.need === con.vars.length) {
-          for (const v of con.vars) if (!knownMines.has(v)) { knownMines.add(v); changed = true; }
+        } else if (effNeed === live.length) {
+          for (const v of live) if (!knownMines.has(v)) { knownMines.add(v); changed = true; }
           con.vars = [];
         }
       }
       for (const con of constraints) con.vars = con.vars.filter(v => !knownMines.has(v) && !knownSafe.has(v));
       // Subset difference: if a ⊂ b, then b needs (need_b - need_a) extra mines
       // among (b \ a) and (a) is exactly need_a. Identify the extra cells.
+      // CRITICAL: do NOT mutate b.need — the main engine still uses the
+      // original need to compute effective-need from forced mines.
       for (let i = 0; i < constraints.length; i++) {
         for (let j = 0; j < constraints.length; j++) {
           if (i === j) continue;
@@ -72,24 +82,23 @@
           const aSet = new Set(a.vars);
           if (a.vars.every(v => b.vars.includes(v)) && a.vars.length < b.vars.length) {
             const diff = b.vars.filter(v => !aSet.has(v));
-            const needDiff = b.need - a.need;
+            const aForced = a.vars.length - a.vars.filter(v => !knownMines.has(v) && !knownSafe.has(v)).length;
+            const bForced = b.vars.length - b.vars.filter(v => !knownMines.has(v) && !knownSafe.has(v)).length;
+            const aEff = a.need - aForced;
+            const bEff = b.need - bForced;
+            const needDiff = bEff - aEff;
             if (needDiff === 0) {
               for (const v of diff) if (!knownSafe.has(v)) { knownSafe.add(v); changed = true; }
-              b.vars = a.vars.slice();
-              b.need = a.need;
+              b.vars = [];
             } else if (needDiff === diff.length) {
               for (const v of diff) if (!knownMines.has(v)) { knownMines.add(v); changed = true; }
-              b.vars = a.vars.slice();
-              b.need = a.need;
+              b.vars = [];
             } else if (needDiff >= 0 && needDiff < diff.length) {
-              // Recurse on the new subconstraint.
               b.vars = diff.slice();
-              b.need = needDiff;
             }
           }
         }
       }
-      for (const con of constraints) con.vars = con.vars.filter(v => !knownMines.has(v) && !knownSafe.has(v));
     }
 
     for (const i of knownMines) {
@@ -150,43 +159,38 @@
       const vars = compVars[ci];
       const cons = compConstraints[ci];
       if (!cons.length) continue;
+      // Build live-var filter: only vars not known to be mine or safe.
+      // Also adjust constraint's effective need by the number of its
+      // hidden-neighbor cells already forced.
+      const liveCons = cons
+        .map(con => ({
+          ...con,
+          liveVars: con.vars.filter(v => !knownMines.has(v) && !knownSafe.has(v)),
+          forcedMines: con.vars.filter(v => knownMines.has(v)).length,
+        }))
+        .filter(con => {
+          // Drop constraints already fully resolved (no live vars) OR
+          // whose live vars is empty AND it was satisfied. Keep those
+          // that still constrain the live vars.
+          if (con.liveVars.length === 0) return false;
+          return true;
+        });
+      if (!liveCons.length) continue;
       const idx = new Map(vars.map((v, i) => [v, i]));
-      const ordered = cons.slice().sort((a, b) => {
-        const da = a.need, db = b.need;
-        if (da !== db) return da - db;
-        return a.vars.length - b.vars.length;
-      });
       const total = vars.length;
       const mineCount = new Float64Array(total);
       let validConfigs = 0;
       const mineBudget = Math.min(remaining, total);
-      const cellConfigCount = new Float64Array(total);
-      function recurse(depth, partial) {
-        if (depth === total) {
-          validConfigs++;
-          for (let i = 0; i < total; i++) if (partial & (1 << i)) mineCount[i]++;
-          return;
-        }
-        const remainingCells = total - depth;
-        const maxAssign = Math.min(mineBudget - partial, remainingCells);
-        for (let take = 0; take <= maxAssign; take++) {
-          // pick `take` mines into the next `remainingCells` slots
-          // Equivalent to assigning the next `take` of the remaining variables.
-          // For simplicity we use per-variable backtracking instead.
-          recurseVariable(depth, partial, take);
-          return;
-        }
-      }
-      // Simple per-variable backtracking (avoids combinatorial generation).
       function recurseVariable(depth, partial) {
         if (depth === total) {
-          // Check constraints satisfied.
-          for (const con of cons) {
+          // Check live constraints satisfied. Adjust each constraint's
+          // need by forcedMines that already count toward it.
+          for (const con of liveCons) {
             let s = 0;
-            for (const v of con.vars) {
+            for (const v of con.liveVars) {
               if (partial & (1 << idx.get(v))) s++;
             }
-            if (s !== con.need) return;
+            if (s !== con.need - con.forcedMines) return;
           }
           validConfigs++;
           for (let i = 0; i < total; i++) if (partial & (1 << i)) mineCount[i]++;
@@ -194,9 +198,7 @@
         }
         const ones = popcount32(partial);
         if (ones > remaining) return;
-        // Try this variable as a safe cell.
         recurseVariable(depth + 1, partial);
-        // Try as a mine.
         if (ones < remaining) {
           recurseVariable(depth + 1, partial | (1 << depth));
         }

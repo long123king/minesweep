@@ -819,6 +819,20 @@
     if (performance.now() - started > SOLVER_BUDGET_MS) {
       console.warn(`computeProbabilities took ${(performance.now() - started).toFixed(0)}ms`);
     }
+    // Diagnostic: count forced cells and check if forced-mines exceed budget.
+    if (window.__debug) {
+      let nForce = 0, nSafe = 0;
+      for (let i = 0; i < result.length; i++) {
+        if (result[i] === 1) nForce++;
+        else if (result[i] === 0 && pMineCache && pMineCache[i] === 0) {
+          const r = Math.floor(i / cols), c = i % cols;
+          if (!revealed[r][c] && !flagged[r][c]) nSafe++;
+        }
+      }
+      if (nForce > mineCount - flagsPlaced) {
+        console.warn(`SOLVER: ${nForce} forced mines but only ${mineCount - flagsPlaced} budget`);
+      }
+    }
     return result;
   }
 
@@ -975,20 +989,28 @@
     // Fixed-point direct deduction on the NORMALIZED constraints. This is
     // the "real player" layer that runs first and never skips cells
     // because their component is too big.
+    //
+    // CRITICAL: a constraint's effective need = original need - mines already
+    // forced into its hidden-neighbor set. Without this, after marking
+    // (2,3) as a mine, the (2,2)=1 clue still has need=1 with only (1,3)
+    // remaining, which incorrectly forces (1,3) to also be a mine.
     let dpChanged = true;
     while (dpChanged) {
       dpChanged = false;
       for (const con of normalized) {
         const live = con.vars.filter(v => !knownMine[v] && !knownSafe[v]);
+        const forcedInCon = con.vars.filter(v => knownMine[v]).length;
+        const effNeed = con.need - forcedInCon;
         if (live.length === 0) continue;
-        if (con.need < 0 || con.need > live.length) continue;
-        if (con.need === 0) {
+        if (effNeed < 0 || effNeed > live.length) continue;
+        if (effNeed === 0) {
           for (const v of live) if (!knownSafe[v]) { knownSafe[v] = 1; dpChanged = true; }
-        } else if (con.need === live.length) {
+        } else if (effNeed === live.length) {
           for (const v of live) if (!knownMine[v]) { knownMine[v] = 1; dpChanged = true; }
         }
       }
-      // Subset difference: if a ⊂ b, derive b's extra cells.
+      // Subset difference: if a ⊂ b, derive b's extra cells. Both sides
+      // also need their effective need reduced by already-known mines.
       for (let i = 0; i < normalized.length; i++) {
         for (let j = 0; j < normalized.length; j++) {
           if (i === j) continue;
@@ -998,8 +1020,12 @@
           if (aLive.length === 0 || aLive.length >= bLive.length) continue;
           const aSet = new Set(aLive);
           if (!aLive.every(v => bLive.includes(v))) continue;
+          const aForced = a.vars.filter(v => knownMine[v]).length;
+          const bForced = b.vars.filter(v => knownMine[v]).length;
+          const aEffNeed = a.need - aForced;
+          const bEffNeed = b.need - bForced;
           const diff = bLive.filter(v => !aSet.has(v));
-          const needDiff = b.need - a.need;
+          const needDiff = bEffNeed - aEffNeed;
           if (needDiff === 0) {
             for (const v of diff) if (!knownSafe[v]) { knownSafe[v] = 1; dpChanged = true; }
           } else if (needDiff === diff.length) {
@@ -1025,12 +1051,16 @@
       if (m === 0) continue;
       if (m > MAX_VARS) continue; // too big — fall back to global rate
 
-      // For each frontier cell, count (flags + mines among unknowns).
-      // The constraint is: flags_in_8nb + mines_in_unknowns = adjacency.
+      // For each frontier cell, count (flags + forced mines among unknowns) +
+      // safe cells. The constraint's `need` is the remaining mines needed
+      // among the LIVE unknown vars after subtracting forced mines and
+      // removing safe cells. Without this adjustment the enumeration uses
+      // a stale need and produces wrong counts.
       const constraints = []; // [{ frontierIdx, vars: [indices into vars], need: int, flags: int }]
       for (const fIdx of comp.frontier) {
         const [fr, fc] = idxRC(fIdx);
         let flags = 0;
+        let forcedInvolved = 0;
         const involvedVars = [];
         for (let dr = -1; dr <= 1; dr++) {
           for (let dc = -1; dc <= 1; dc++) {
@@ -1038,8 +1068,11 @@
             const nr = fr + dr, nc = fc + dc;
             if (!inBounds(nr, nc)) continue;
             if (flagged[nr][nc]) { flags++; continue; }
+            const ni = nr * cols + nc;
+            if (knownMine[ni]) { forcedInvolved++; continue; }
+            if (knownSafe[ni]) continue;
             if (!revealed[nr][nc]) {
-              const v = vars.indexOf(nr * cols + nc);
+              const v = vars.indexOf(ni);
               if (v !== -1) involvedVars.push(v);
             }
           }
@@ -1047,7 +1080,7 @@
         constraints.push({
           frontierIdx: fIdx,
           vars: involvedVars,
-          need: adjacent[fr][fc] - flags,
+          need: adjacent[fr][fc] - flags - forcedInvolved,
           flags,
         });
       }
@@ -1130,7 +1163,11 @@
     }
 
     // 4. Combine + global-rate fallback for cells outside any frontier.
-    let remainingMines = mineCount - flagsPlaced;
+    // Subtract forced mines from the global budget so far cells are not
+    // over-allocated.
+    let forcedMineCount = 0;
+    for (let i = 0; i < N; i++) if (knownMine[i]) forcedMineCount++;
+    let remainingMines = mineCount - flagsPlaced - forcedMineCount;
     let unrevealedTotal = 0;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
@@ -1184,23 +1221,30 @@
       const bitOf = new Map();
       for (let i = 0; i < freeCells.length; i++) bitOf.set(freeCells[i], i);
       // Translate involved-cell-idxs into bit positions (drop ones not free).
+      // Also subtract forced mines from the constraint's need so the brute
+      // force uses the post-propagation requirements.
       const bfConstraints = allConstraints.map(con => {
         const bits = [];
+        let forced = 0;
         for (const ci of con.involved) {
+          if (knownMine[ci]) { forced++; continue; }
+          if (knownSafe[ci]) continue;
           const b = bitOf.get(ci);
           if (b !== undefined) bits.push(b);
         }
-        return { bits, need: con.need };
+        return { bits, need: con.need - forced };
       });
       const F = freeCells.length;
       const limit = 1 << F;
       const bfMineCount = new Int32Array(F);
       let bfTotal = 0;
+      // Effective remaining mines after subtracting forced-mines.
+      const effectiveRemaining = remainingMines - forcedMineCount;
       for (let bits = 0; bits < limit; bits++) {
-        // Mine count check: popcount must equal remainingMines.
+        // Mine count check: popcount must equal effectiveRemaining.
         let pop = 0;
         for (let b = 0; b < F; b++) if ((bits >> b) & 1) pop++;
-        if (pop !== remainingMines) continue;
+        if (pop !== effectiveRemaining) continue;
         // Check every constraint.
         let ok = true;
         for (const con of bfConstraints) {
@@ -2091,6 +2135,35 @@
 
   buildDifficultyBar();
   newGame();
+
+  // Debug hook: load a board from a Copy Layout JSON dump so we can
+  // reproduce reported issues without sharing the click sequence.
+  window.__loadLayout = function (dump) {
+    const data = typeof dump === 'string' ? JSON.parse(dump) : dump;
+    rows = data.rows;
+    cols = data.cols;
+    mineCount = data.totalMines;
+    flagsPlaced = data.flagsPlaced;
+    currentDifficulty = data.difficulty;
+    board = Array.from({ length: rows }, () => Array(cols).fill(0));
+    revealed = Array.from({ length: rows }, () => Array(cols).fill(false));
+    flagged = Array.from({ length: rows }, () => Array(cols).fill(false));
+    adjacent = Array.from({ length: rows }, () => Array(cols).fill(0));
+    for (const c of data.cells) {
+      const r = c.row - 1, cc = c.col - 1;
+      if (c.state === 'revealed') { revealed[r][cc] = true; adjacent[r][cc] = c.number || 0; }
+      else if (c.state === 'flagged') { flagged[r][cc] = true; }
+    }
+    gameOver = false; won = false; firstClick = false;
+    cellsRevealed = 0;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (revealed[r][c]) cellsRevealed++;
+    stopTimer();
+    updateMineCounter();
+    setFace('idle');
+    renderBoard();
+    invalidateInsight();
+    return { rows, cols, mineCount, flagsPlaced, cellsRevealed };
+  };
 })();
 </script>
 </body>
