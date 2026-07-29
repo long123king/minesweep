@@ -254,6 +254,56 @@
     line-height: 1.55;
     color: var(--text);
   }
+  /* Step-by-step calculation block — shows how the probability was
+     computed (enumeration sizes, filter counts, the final formula). */
+  .analysis-panel .ap-calc {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: rgba(10, 10, 18, 0.55);
+    border: 1px solid var(--border-dark);
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  .analysis-panel .ap-calc-title {
+    font-size: 10px;
+    font-weight: bold;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed var(--border-dark);
+  }
+  .analysis-panel .ap-calc-step {
+    color: var(--text);
+    margin: 3px 0;
+    line-height: 1.5;
+  }
+  .analysis-panel .ap-calc-step b {
+    color: var(--accent);
+    font-weight: bold;
+  }
+  .analysis-panel .ap-calc-step code {
+    background: rgba(0,0,0,0.4);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 10px;
+    font-family: "Courier New", monospace;
+  }
+  .analysis-panel .ap-calc-formula {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border-dark);
+    font-family: "Courier New", monospace;
+    font-size: 12px;
+    color: var(--text);
+    font-weight: bold;
+  }
+  .analysis-panel .ap-calc-formula b {
+    color: var(--accent);
+    font-size: 13px;
+  }
   .analysis-panel .ap-stats {
     margin-top: 10px;
     padding-top: 8px;
@@ -1414,74 +1464,231 @@
   // Layout: hero (cell + percentage), plain-English reason, compact
   // stats, legend.
   function buildAnalysis(r, c) {
-    const idx = r * cols + c;
-    const records = analysisCache.get(idx) || [];
-    const cellLabel = idxToLabel(idx);
+      const idx = r * cols + c;
+      const records = analysisCache.get(idx) || [];
+      const cellLabel = idxToLabel(idx);
 
-    // Case 1: game over → ground truth.
-    if (gameOver) {
-      const isMine = board[r][c] === 1;
-      const pctText = isMine ? 'MINE' : 'SAFE';
-      const pctColorVal = isMine ? '#ff5555' : '#5fb3f7';
-      const reason = isMine
-        ? `Game over — this cell contains a mine.`
-        : `Game over — this cell is safe.`;
-      return `
-        <div class="ap-hero">
-          <span class="ap-cell">Cell ${cellLabel}</span>
-          <span class="ap-pct" style="color:${pctColorVal}">${pctText}</span>
-        </div>
-        <div class="ap-reason">${reason}</div>`;
-    }
-
-    // Case 2: flagged.
-    if (flagged[r][c]) {
-      return `
-        <div class="ap-hero">
-          <span class="ap-cell">Cell ${cellLabel}</span>
-          <span class="ap-pct" style="color:#ff5555">FLAG</span>
-        </div>
-        <div class="ap-reason">You've marked this as a mine. The solver treats it as one when working out probabilities for other cells.</div>`;
-    }
-
-    // Case 3: revealed.
-    if (revealed[r][c]) {
-      const adj = adjacent[r][c];
-      const reason = adj === 0
-        ? `Revealed cell — no adjacent mines. It contributes zero information about neighbors beyond being empty.`
-        : `Revealed ${adj} — this cell's number is one of the constraints that determines probabilities for its unrevealed neighbors (highlighted in orange when you hover them).`;
-      return `
-        <div class="ap-hero">
-          <span class="ap-cell">Cell ${cellLabel}</span>
-          <span class="ap-pct" style="color:#9090a8">${adj}</span>
-        </div>
-        <div class="ap-reason">${reason}</div>`;
-    }
-
-    // Case 4: active analysis.
-    const p = pMineCache[idx];
-    const pct = (p * 100).toFixed(1);
-    const pColor = pctColor(p);
-
-    // Brute-force records carry the exact (joint-constraint, global-count)
-    // probability. The component records that may also be present are
-    // useful for highlighting cells on the board, but the displayed
-    // number comes from brute force.
-    const bfRec = records.find(rec => rec.bruteForce);
-    if (bfRec) {
-      const total = bfRec.bfTotal;
-      const withMine = bfRec.bfMineCount;
-      const remaining = bfRec.remainingMines;
-      const totalFree = bfRec.unrevealedTotal;
-      const realRecords = records.filter(rec => !rec.globalRate && !rec.bruteForce);
-      let reason;
-      if (realRecords.length > 0) {
-        reason = reasonForced(realRecords, idx);
-        if (!reason) reason = realRecords.map(rec => reasonPartial(rec)).join(' ');
-      } else {
-        reason = `No number cells touch you directly, so this is set by the global mine count: ${plural(remaining, 'mine')} among ${plural(totalFree, 'unrevealed cell')}.`;
+      // Case 1: game over → ground truth.
+      if (gameOver) {
+        const isMine = board[r][c] === 1;
+        const pctText = isMine ? 'MINE' : 'SAFE';
+        const pctColorVal = isMine ? '#ff5555' : '#5fd7d7';
+        const reason = isMine
+          ? `Game over — this cell contains a mine.`
+          : `Game over — this cell is safe.`;
+        const calc = `
+          <div class="ap-calc">
+            <div class="ap-calc-title">Calculation</div>
+            <div class="ap-calc-step">[1] Board is in terminal state — all mines are revealed.</div>
+            <div class="ap-calc-step">[2] Cell ${cellLabel} = <b>${isMine ? 'mine' : 'safe'}</b> (known exactly).</div>
+          </div>`;
+        return `
+          <div class="ap-hero">
+            <span class="ap-cell">Cell ${cellLabel}</span>
+            <span class="ap-pct" style="color:${pctColorVal}">${pctText}</span>
+          </div>
+          <div class="ap-reason">${reason}</div>
+          ${calc}`;
       }
-      const stats = `<div class="ap-stats">Computed from ${total.toLocaleString()} valid placement${total === 1 ? '' : 's'} matching every constraint and the global mine count (exact)</div>`;
+
+      // Case 2: flagged.
+      if (flagged[r][c]) {
+        const calc = `
+          <div class="ap-calc">
+            <div class="ap-calc-title">Calculation</div>
+            <div class="ap-calc-step">[1] You placed a flag on this cell.</div>
+            <div class="ap-calc-step">[2] Solver treats it as a known mine (reduces <code>need</code> on adjacent constraint cells by 1).</div>
+            <div class="ap-calc-step">[3] P(mine) = 100% by your declaration.</div>
+          </div>`;
+        return `
+          <div class="ap-hero">
+            <span class="ap-cell">Cell ${cellLabel}</span>
+            <span class="ap-pct" style="color:#ff5555">FLAG</span>
+          </div>
+          <div class="ap-reason">You've marked this as a mine. The solver treats it as one when working out probabilities for other cells.</div>
+          ${calc}`;
+      }
+
+      // Case 3: revealed.
+      if (revealed[r][c]) {
+        const adj = adjacent[r][c];
+        const reason = adj === 0
+          ? `Revealed cell — no adjacent mines. It contributes zero information about neighbors beyond being empty.`
+          : `Revealed ${adj} — this cell's number is one of the constraints that determines probabilities for its unrevealed neighbors (highlighted in orange when you hover them).`;
+        const calc = adj === 0
+          ? `<div class="ap-calc">
+              <div class="ap-calc-title">Calculation</div>
+              <div class="ap-calc-step">[1] Cell is revealed with adj = 0 (no adjacent mines).</div>
+              <div class="ap-calc-step">[2] It is NOT a frontier cell (no unrevealed neighbors need constraints).</div>
+            </div>`
+          : `<div class="ap-calc">
+              <div class="ap-calc-title">Calculation</div>
+              <div class="ap-calc-step">[1] Cell is revealed with adj = ${adj}.</div>
+              <div class="ap-calc-step">[2] This constraint equation will be used by the solver: <code>adj = sum of mines in its unrevealed neighbors</code>.</div>
+            </div>`;
+        return `
+          <div class="ap-hero">
+            <span class="ap-cell">Cell ${cellLabel}</span>
+            <span class="ap-pct" style="color:#9090a8">${adj}</span>
+          </div>
+          <div class="ap-reason">${reason}</div>
+          ${calc}`;
+      }
+
+      // Case 4: active analysis.
+      const p = pMineCache[idx];
+      const pct = (p * 100).toFixed(1);
+      const pColor = pctColor(p);
+
+      // Brute-force records carry the exact (joint-constraint, global-count)
+      // probability. The component records that may also be present are
+      // useful for highlighting cells on the board, but the displayed
+      // number comes from brute force.
+      const bfRec = records.find(rec => rec.bruteForce);
+      if (bfRec) {
+        const total = bfRec.bfTotal;
+        const withMine = bfRec.bfMineCount;
+        const remaining = bfRec.remainingMines;
+        const totalFree = bfRec.unrevealedTotal;
+        const realRecords = records.filter(rec => !rec.globalRate && !rec.bruteForce);
+        // Count all revealed numbered cells (the constraints actually
+        // applied during brute force). This includes both frontier and
+        // non-frontier revealed numbers.
+        let totalConstraints = 0;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            if (revealed[r][c] && adjacent[r][c] > 0) totalConstraints++;
+          }
+        }
+        let reason;
+        if (realRecords.length > 0) {
+          reason = reasonForced(realRecords, idx);
+          if (!reason) reason = realRecords.map(rec => reasonPartial(rec)).join(' ');
+        } else {
+          reason = `No number cells touch you directly, so this is set by the global mine count: ${plural(remaining, 'mine')} among ${plural(totalFree, 'unrevealed cell')}.`;
+        }
+        const subsetsTried = 1 << totalFree;
+        const calc = `
+          <div class="ap-calc">
+            <div class="ap-calc-title">Calculation (exhaustive brute force)</div>
+            <div class="ap-calc-step">[1] Free cells: <b>${totalFree}</b> unrevealed + <b>${flagsPlaced}</b> flagged. Total mines to place: <b>${remaining}</b>.</div>
+            <div class="ap-calc-step">[2] Constraint equations: <b>${totalConstraints}</b> from revealed-numbered cells (every revealed number produces one equation: <code>adj = sum of mines in its unrevealed neighbors</code>). Plus the global mine count of ${remaining}.</div>
+            <div class="ap-calc-step">[3] Enumerated <b>${subsetsTried.toLocaleString()}</b> subsets (2<sup>${totalFree}</sup>); each one is a candidate mine placement.</div>
+            <div class="ap-calc-step">[4] Filtered by every constraint equation and the global mine count. <b>${total.toLocaleString()}</b> placement${total === 1 ? '' : 's'} survived.</div>
+            <div class="ap-calc-step">[5] Your cell is a mine in <b>${withMine.toLocaleString()}</b> of those ${total.toLocaleString()} valid placements.</div>
+            <div class="ap-calc-formula">P(mine) = ${withMine.toLocaleString()} / ${total.toLocaleString()} = <b>${pct}%</b></div>
+          </div>`;
+        const legend = `
+          <div class="ap-legend">
+            <span><i style="background:#ffd866;color:#ffd866"></i> subject</span>
+            <span><i style="background:#5fd7d7;color:#5fd7d7"></i> co-unknown</span>
+            <span><i style="background:transparent;color:#f7a05f;border-style:dashed"></i> constraint</span>
+            <span><i style="background:transparent;color:#ff5555;border-style:dotted"></i> flag</span>
+          </div>`;
+        return `
+          <div class="ap-hero">
+            <span class="ap-cell">Cell ${cellLabel}</span>
+            <span class="ap-pct" style="color:${pColor}">${pct}%</span>
+          </div>
+          <div class="ap-reason">${reason}</div>
+          ${calc}
+          ${legend}`;
+      }
+
+      const realRecords = records.filter(rec => !rec.globalRate);
+      const globalRec  = records.find(rec => rec.globalRate);
+
+      let reason;
+      if (realRecords.length === 0) {
+        reason = reasonGlobal(globalRec);
+      } else {
+        // Try forced first (0% / 100%); fall back to partial.
+        reason = reasonForced(realRecords, idx);
+        if (!reason) {
+          // Combine reasons from all components, weighted.
+          reason = realRecords.map(rec => reasonPartial(rec)).join(' ');
+        }
+      }
+
+      const totalUnk = totalUnknownCount(realRecords);
+      const totalCon = totalConstraintCount(realRecords);
+
+      // Build the step-by-step calculation block.
+      let calc;
+      if (realRecords.length === 0) {
+        // Far cell: global rate only
+        const farN = globalRec.farCellCount || 0;
+        const farM = globalRec.farCellExpectedMines || 0;
+        const inN = globalRec.inComponentCellCount || 0;
+        const inE = globalRec.inComponentExpectedMines || 0;
+        calc = `
+          <div class="ap-calc">
+            <div class="ap-calc-title">Calculation (global rate fallback)</div>
+            <div class="ap-calc-step">[1] No constraint cells touch this cell — it's outside every solver component.</div>
+            <div class="ap-calc-step">[2] Total mines remaining: <b>${globalRec.remainingMines}</b> · Total unrevealed: <b>${globalRec.unrevealedTotal}</b>.</div>
+            <div class="ap-calc-step">[3] In-component cells (${inN}) collectively expect <b>~${inE.toFixed(1)}</b> mines from local constraints.</div>
+            <div class="ap-calc-step">[4] Remaining for far cells: <b>${globalRec.remainingMines}</b> − <b>${inE.toFixed(1)}</b> = <b>${farM.toFixed(1)}</b> across <b>${farN}</b> far cells.</div>
+            <div class="ap-calc-formula">P(mine) = ${farM.toFixed(1)} / ${farN} = <b>${pct}%</b></div>
+          </div>`;
+      } else {
+        // In a component: enumerate configs, count mine-at-cell.
+        // Sum total configs across all components the subject is in.
+        const subjectCompId = realRecords[0].componentId;
+        const subjRec = realRecords.find(r => r.componentId === subjectCompId) || realRecords[0];
+        const totalC = subjRec.totalConfigs;
+        const mineC = subjRec.configsWithMine;
+        const isForced = (mineC === 0 || mineC === totalC);
+        const calcSteps = [];
+        // Per-component breakdown
+        if (realRecords.length === 1) {
+          const r = realRecords[0];
+          const limitR = Math.min(1 << r.m, 1 << 20);
+          const subsets = Math.min(1 << r.m, limitR);
+          calcSteps.push(`[1] Solver component: <b>${r.m}</b> unknown cells, <b>${r.constraints.length}</b> constraint equations.`);
+          if (subsets < (1 << r.m)) {
+            calcSteps.push(`[2] Enumerated up to <b>${subsets.toLocaleString()}</b> mine placements (component too large: capped at 2²⁰).`);
+          } else {
+            calcSteps.push(`[2] Enumerated <b>${subsets.toLocaleString()}</b> mine placements (2<sup>${r.m}</sup>).`);
+          }
+          calcSteps.push(`[3] Filtered by the <b>${r.constraints.length}</b> constraint equation${r.constraints.length === 1 ? '' : 's'} from nearby revealed numbers.`);
+          if (isForced) {
+            calcSteps.push(`[4] <b>${totalC.toLocaleString()}</b> valid placement${totalC === 1 ? '' : 's'} survived. <b>Your cell is mine in ${mineC === 0 ? 'zero' : 'all'} of them</b> — probability is forced.`);
+          } else {
+            calcSteps.push(`[4] <b>${totalC.toLocaleString()}</b> valid placement${totalC === 1 ? '' : 's'} survived the filter.`);
+            calcSteps.push(`[5] Your cell is a mine in <b>${mineC.toLocaleString()}</b> of those ${totalC.toLocaleString()} placements.`);
+          }
+        } else {
+          // Multiple components (rare with bipartite BFS)
+          calcSteps.push(`[1] Cell sits at intersection of <b>${realRecords.length}</b> solver components.`);
+          for (let i = 0; i < realRecords.length; i++) {
+            const r = realRecords[i];
+            calcSteps.push(`[${2 + i}] Component ${i + 1}: ${r.m} unknowns, ${r.constraints.length} equations, ${r.totalConfigs.toLocaleString()} configs (cell is mine in ${r.configsWithMine.toLocaleString()}).`);
+          }
+          calcSteps.push(`[${2 + realRecords.length}] Combined: cell-mine configs / total configs = ${mineC.toLocaleString()} / ${totalC.toLocaleString()}.`);
+        }
+        // Global budget step
+        const inN = globalRec ? (globalRec.inComponentCellCount || 0) : 0;
+        const inE = globalRec ? (globalRec.inComponentExpectedMines || 0) : 0;
+        const farN = globalRec ? (globalRec.farCellCount || 0) : 0;
+        const farM = globalRec ? (globalRec.farCellExpectedMines || 0) : 0;
+        const sf = globalRec ? (globalRec.scaleFactor || 1) : 1;
+        if (globalRec && (inN > 0 || farN > 0)) {
+          if (sf < 1) {
+            calcSteps.push(`[N] Global budget: <b>${globalRec.remainingMines}</b> mines; components expect <b>~${inE.toFixed(1)}</b> — over-budget by factor ${sf.toFixed(2)}. Scaled component P values down by ${((1 - sf) * 100).toFixed(0)}% to fit.`);
+          } else {
+            calcSteps.push(`[N] Global budget check: ${globalRec.remainingMines} mines total, components fit (expect ~${inE.toFixed(1)}); no scaling needed.`);
+          }
+        }
+        calcSteps.push(`P(mine) = ${mineC.toLocaleString()} / ${totalC.toLocaleString()}${sf < 1 ? ` × ${sf.toFixed(3)}` : ''} = <b>${pct}%</b>`);
+
+        calc = `
+          <div class="ap-calc">
+            <div class="ap-calc-title">Calculation (component solver)</div>
+            ${calcSteps.map(s => `<div class="ap-calc-step">${s}</div>`).join('\n')}
+            <div class="ap-calc-formula">P(mine) = <b>${pct}%</b></div>
+          </div>`;
+      }
+
       const legend = `
         <div class="ap-legend">
           <span><i style="background:#ffd866;color:#ffd866"></i> subject</span>
@@ -1489,55 +1696,16 @@
           <span><i style="background:transparent;color:#f7a05f;border-style:dashed"></i> constraint</span>
           <span><i style="background:transparent;color:#ff5555;border-style:dotted"></i> flag</span>
         </div>`;
+
       return `
         <div class="ap-hero">
           <span class="ap-cell">Cell ${cellLabel}</span>
           <span class="ap-pct" style="color:${pColor}">${pct}%</span>
         </div>
-        <div class="ap-reason">${reason} ${withMine.toLocaleString()} of ${total.toLocaleString()} consistent placements put a mine here.</div>
-        ${stats}
+        <div class="ap-reason">${reason}</div>
+        ${calc}
         ${legend}`;
     }
-
-    const realRecords = records.filter(rec => !rec.globalRate);
-    const globalRec  = records.find(rec => rec.globalRate);
-
-    let reason;
-    if (realRecords.length === 0) {
-      reason = reasonGlobal(globalRec);
-    } else {
-      // Try forced first (0% / 100%); fall back to partial.
-      reason = reasonForced(realRecords, idx);
-      if (!reason) {
-        // Combine reasons from all components, weighted.
-        reason = realRecords.map(rec => reasonPartial(rec)).join(' ');
-      }
-    }
-
-    const totalUnk = totalUnknownCount(realRecords);
-    const totalCon = totalConstraintCount(realRecords);
-
-    const stats = realRecords.length > 0
-      ? `<div class="ap-stats">${totalUnk} unknown cells · ${totalCon} constraint equations · ${realRecords.length} solver region${realRecords.length > 1 ? 's' : ''} · local approximation</div>`
-      : `<div class="ap-stats">No local constraints — using global rate only</div>`;
-
-    const legend = `
-      <div class="ap-legend">
-        <span><i style="background:#ffd866;color:#ffd866"></i> subject</span>
-        <span><i style="background:#5fd7d7;color:#5fd7d7"></i> co-unknown</span>
-        <span><i style="background:transparent;color:#f7a05f;border-style:dashed"></i> constraint</span>
-        <span><i style="background:transparent;color:#ff5555;border-style:dotted"></i> flag</span>
-      </div>`;
-
-    return `
-      <div class="ap-hero">
-        <span class="ap-cell">Cell ${cellLabel}</span>
-        <span class="ap-pct" style="color:${pColor}">${pct}%</span>
-      </div>
-      <div class="ap-reason">${reason}</div>
-      ${stats}
-      ${legend}`;
-  }
 
   // Build the human-readable analysis HTML for a cell. The solver
   // already produced analysisCache for this cell — we just format it.
