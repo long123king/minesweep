@@ -915,9 +915,81 @@
     }
 
     // 3. Enumerate configurations per component.
+    // First: deterministic fixed-point propagation on ALL constraints so
+    // forced cells are never swallowed by component-size limits. The
+    // enumeration below skips any cell already known to be a mine or safe.
+    const knownMine = new Uint8Array(N);
+    const knownSafe = new Uint8Array(N);
+    for (const ci of 0) {} // placeholder
+    // Build (clue, varIndices, need) before we mutate the constraint list.
+    // Constraint normalization: convert "flags + unknowns = adjacency" to
+    // "remaining mines among unknowns" by subtracting flags.
+    const normalized = [];
+    for (const fIdx of frontierCells) {
+      const [fr, fc] = idxRC(fIdx);
+      let flags = 0;
+      const involved = [];
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = fr + dr, nc = fc + dc;
+          if (!inBounds(nr, nc)) continue;
+          if (flagged[nr][nc]) { flags++; continue; }
+          if (!revealed[nr][nc]) involved.push(nr * cols + nc);
+        }
+      }
+      normalized.push({ frontier: fIdx, vars: involved, need: adjacent[fr][fc] - flags });
+    }
+
+    // Fixed-point direct deduction on the NORMALIZED constraints. This is
+    // the "real player" layer that runs first and never skips cells
+    // because their component is too big.
+    let dpChanged = true;
+    while (dpChanged) {
+      dpChanged = false;
+      for (const con of normalized) {
+        const live = con.vars.filter(v => !knownMine[v] && !knownSafe[v]);
+        if (live.length === 0) continue;
+        if (con.need < 0 || con.need > live.length) continue;
+        if (con.need === 0) {
+          for (const v of live) if (!knownSafe[v]) { knownSafe[v] = 1; dpChanged = true; }
+        } else if (con.need === live.length) {
+          for (const v of live) if (!knownMine[v]) { knownMine[v] = 1; dpChanged = true; }
+        }
+      }
+      // Subset difference: if a ⊂ b, derive b's extra cells.
+      for (let i = 0; i < normalized.length; i++) {
+        for (let j = 0; j < normalized.length; j++) {
+          if (i === j) continue;
+          const a = normalized[i], b = normalized[j];
+          const aLive = a.vars.filter(v => !knownMine[v] && !knownSafe[v]);
+          const bLive = b.vars.filter(v => !knownMine[v] && !knownSafe[v]);
+          if (aLive.length === 0 || aLive.length >= bLive.length) continue;
+          const aSet = new Set(aLive);
+          if (!aLive.every(v => bLive.includes(v))) continue;
+          const diff = bLive.filter(v => !aSet.has(v));
+          const needDiff = b.need - a.need;
+          if (needDiff === 0) {
+            for (const v of diff) if (!knownSafe[v]) { knownSafe[v] = 1; dpChanged = true; }
+          } else if (needDiff === diff.length) {
+            for (const v of diff) if (!knownMine[v]) { knownMine[v] = 1; dpChanged = true; }
+          }
+        }
+      }
+    }
+
+    // Surface all forced cells BEFORE enumeration. From now on the
+    // enumeration step is responsible only for cells that aren't
+    // deterministically known.
+    for (let i = 0; i < N; i++) {
+      if (revealed[Math.floor(i / cols)][i % cols] || flagged[Math.floor(i / cols)][i % cols]) continue;
+      if (knownMine[i]) { out[i] = 1; weight[i] = 1; }
+      else if (knownSafe[i]) { out[i] = 0; weight[i] = 1; }
+    }
+
     for (let ci = 0; ci < components.length; ci++) {
       const comp = components[ci];
-      const vars = comp.unknowns;
+      const vars = comp.unknowns.filter(v => !knownMine[v] && !knownSafe[v]);
       const m = vars.length;
       if (m === 0) continue;
       if (m > MAX_VARS) continue; // too big — fall back to global rate
@@ -936,7 +1008,7 @@
             if (!inBounds(nr, nc)) continue;
             if (flagged[nr][nc]) { flags++; continue; }
             if (!revealed[nr][nc]) {
-              const v = vars.indexOf(idxOf(nr, nc));
+              const v = vars.indexOf(nr * cols + nc);
               if (v !== -1) involvedVars.push(v);
             }
           }
