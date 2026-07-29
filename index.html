@@ -790,6 +790,38 @@
   let analysisCache = new Map();   // cellIdx -> [{componentId, ...}, ...]
   let analysisCacheGlobalRate = 0; // populated alongside pMineCache
 
+  // The user-reported `cannot move to row 7` symptom happens when
+  // `computeProbabilities` throws (or never returns) because the current
+  // revealed numbers describe an unsatisfiable board. We wrap it in a
+  // time-bounded try/catch so the hover panel always recovers quickly,
+  // even on contradictory inputs.
+  const SOLVER_BUDGET_MS = 200;
+  function safeComputeProbabilities() {
+    const started = performance.now();
+    let result;
+    try {
+      result = computeProbabilities();
+    } catch (err) {
+      console.error('computeProbabilities failed:', err);
+      const N = rows * cols;
+      const fallback = new Float32Array(N);
+      const remaining = Math.max(0, mineCount - flagsPlaced);
+      const hidden = [];
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        if (!revealed[r][c] && !flagged[r][c]) hidden.push(r * cols + c);
+      }
+      const rate = hidden.length ? Math.min(1, remaining / hidden.length) : 0;
+      for (const i of hidden) fallback[i] = rate;
+      pMineCache = fallback;
+      pMineDirty = false;
+      return pMineCache;
+    }
+    if (performance.now() - started > SOLVER_BUDGET_MS) {
+      console.warn(`computeProbabilities took ${(performance.now() - started).toFixed(0)}ms`);
+    }
+    return result;
+  }
+
   function computeProbabilities() {
     const N = rows * cols;
     const out = new Float32Array(N);   // pMine per cell, default 0
@@ -1330,7 +1362,7 @@
   function paintInsight() {
     if (!showInsight) return;
     if (!pMineCache || pMineDirty) {
-      computeProbabilities();
+      safeComputeProbabilities();
       pMineDirty = false;
     }
     const p = pMineCache;
@@ -1397,7 +1429,7 @@
 
   function ensureSolverFresh() {
     if (!pMineCache || pMineDirty) {
-      computeProbabilities();
+      safeComputeProbabilities();
       pMineDirty = false;
     }
   }
