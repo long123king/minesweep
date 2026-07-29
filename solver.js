@@ -104,7 +104,120 @@
     const rate = unresolved.length ? Math.min(1, remaining / unresolved.length) : 0;
     for (const i of unresolved) { probabilities[i] = rate; methods[i] = 'approximate'; }
 
+    // Build component graph over unresolved frontier cells.
+    const fToU = new Map();
+    const uToF = new Map();
+    for (const con of constraints) {
+      if (con.need < 0 || con.need > con.vars.length) continue;
+      for (const v of con.vars) {
+        if (!fToU.has(con.clue)) fToU.set(con.clue, new Set());
+        fToU.get(con.clue).add(v);
+        if (!uToF.has(v)) uToF.set(v, new Set());
+        uToF.get(v).add(con.clue);
+      }
+    }
+    const compIdU = new Map();
+    const compVars = [];
+    for (const start of unresolved) {
+      if (compIdU.has(start)) continue;
+      if (!uToF.has(start)) continue;
+      const cid = compVars.length;
+      const uset = [];
+      const stack = [start];
+      compIdU.set(start, cid);
+      uset.push(start);
+      while (stack.length) {
+        const cur = stack.pop();
+        for (const f of uToF.get(cur) || []) {
+          for (const v of fToU.get(f) || []) {
+            if (!compIdU.has(v)) {
+              compIdU.set(v, cid);
+              uset.push(v);
+              stack.push(v);
+            }
+          }
+        }
+      }
+      compVars.push(uset);
+    }
+    const compConstraints = compVars.map(vs => {
+      const involvedCons = new Set();
+      for (const v of vs) for (const f of uToF.get(v) || []) involvedCons.add(f);
+      return constraints.filter(c => involvedCons.has(c.clue));
+    });
+
+    for (let ci = 0; ci < compVars.length; ci++) {
+      const vars = compVars[ci];
+      const cons = compConstraints[ci];
+      if (!cons.length) continue;
+      const idx = new Map(vars.map((v, i) => [v, i]));
+      const ordered = cons.slice().sort((a, b) => {
+        const da = a.need, db = b.need;
+        if (da !== db) return da - db;
+        return a.vars.length - b.vars.length;
+      });
+      const total = vars.length;
+      const mineCount = new Float64Array(total);
+      let validConfigs = 0;
+      const mineBudget = Math.min(remaining, total);
+      const cellConfigCount = new Float64Array(total);
+      function recurse(depth, partial) {
+        if (depth === total) {
+          validConfigs++;
+          for (let i = 0; i < total; i++) if (partial & (1 << i)) mineCount[i]++;
+          return;
+        }
+        const remainingCells = total - depth;
+        const maxAssign = Math.min(mineBudget - partial, remainingCells);
+        for (let take = 0; take <= maxAssign; take++) {
+          // pick `take` mines into the next `remainingCells` slots
+          // Equivalent to assigning the next `take` of the remaining variables.
+          // For simplicity we use per-variable backtracking instead.
+          recurseVariable(depth, partial, take);
+          return;
+        }
+      }
+      // Simple per-variable backtracking (avoids combinatorial generation).
+      function recurseVariable(depth, partial) {
+        if (depth === total) {
+          // Check constraints satisfied.
+          for (const con of cons) {
+            let s = 0;
+            for (const v of con.vars) {
+              if (partial & (1 << idx.get(v))) s++;
+            }
+            if (s !== con.need) return;
+          }
+          validConfigs++;
+          for (let i = 0; i < total; i++) if (partial & (1 << i)) mineCount[i]++;
+          return;
+        }
+        const ones = popcount32(partial);
+        if (ones > remaining) return;
+        // Try this variable as a safe cell.
+        recurseVariable(depth + 1, partial);
+        // Try as a mine.
+        if (ones < remaining) {
+          recurseVariable(depth + 1, partial | (1 << depth));
+        }
+      }
+      recurseVariable(0, 0);
+      if (validConfigs > 0) {
+        for (let i = 0; i < total; i++) {
+          const cellIdx = vars[i];
+          probabilities[cellIdx] = mineCount[i] / validConfigs;
+          methods[cellIdx] = 'enumerated';
+        }
+      }
+    }
+
     return { rows, cols, probabilities: Array.from(probabilities), methods, exact: unresolved.length === 0 };
+  }
+
+  function popcount32(x) {
+    x = x - ((x >> 1) & 0x55555555);
+    x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
+    return (((x + (x >> 4)) & 0x0f0f0f0f) * 0x01010101) >> 24;
   }
 
   return { solveMinesweeper };
