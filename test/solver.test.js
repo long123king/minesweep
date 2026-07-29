@@ -50,13 +50,31 @@ test('when clue needs every hidden neighbor, all are mines', () => {
   assert.equal(p(result, 2, 3), 1);
 });
 
+test('subset difference identifies an extra safe cell', () => {
+  // (2,1): {a,b}=1; (2,2): {a,b,c}=1, therefore c is safe.
+  const input = board(2, 3, 1, [[2, 1, 1], [2, 2, 1], [2, 3, 0]]);
+  const result = solveMinesweeper(input);
+  assert.equal(p(result, 1, 3), 0);
+  assert.equal(result.methods[2], 'deterministic');
+});
+
+test('subset difference identifies an extra mine', () => {
+  // (2,1): {a,b}=1; (2,2): {a,b,c}=2, therefore c is a mine.
+  const input = board(2, 3, 2, [[2, 1, 1], [2, 2, 2], [2, 3, 1]]);
+  const result = solveMinesweeper(input);
+  assert.equal(p(result, 1, 3), 1);
+  assert.equal(result.methods[2], 'deterministic');
+});
+
 test('deductions propagate until fixed point', () => {
-  // Top clue forces (1,1) mine. Bottom clue then has its mine satisfied,
-  // making (3,1) safe.
-  const input = board(3, 2, 1, [
-    [1, 2, 1], [2, 1, 1], [2, 2, 1], [3, 2, 1],
+  // 2x3 board. Hidden cells: (1,3) and (2,1). Revealed cells form clues:
+  //   (1,1)=1: hidden neighbors are (1,2)[revealed] and (2,1). need=1, vars=1 -> (2,1) is a mine.
+  //   (2,2)=1: hidden neighbors are (1,3). need=1 - 1 flag (=2,1) = 0, vars=1 -> (1,3) is safe.
+  const input = board(2, 3, 1, [
+    [1, 1, 1], [1, 2, 1],
+    [2, 2, 1],
   ]);
   const result = solveMinesweeper(input);
-  assert.equal(p(result, 1, 1), 1);
-  assert.equal(p(result, 3, 1), 0);
+  assert.equal(p(result, 2, 1), 1);
+  assert.equal(p(result, 1, 3), 0);
 });
