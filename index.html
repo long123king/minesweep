@@ -442,6 +442,8 @@
     <div class="footer" id="difficulty"></div>
     <div class="footer" id="tools">
       <button class="btn" id="insightBtn" aria-pressed="false">Insight: OFF</button>
+      <button class="btn" id="autoFlagBtn" title="Flag every cell the solver currently proves is 100% mine">Auto Flag 100%</button>
+      <button class="btn" id="autoOpenBtn" title="Open one ring of 0% cells (those touching the current revealed area). Click again to advance.">Auto Open 0%</button>
       <button class="btn" id="copyLayoutBtn" title="Copy board state and current probability for every cell">Copy Layout</button>
     </div>
     <div class="help">
@@ -468,10 +470,13 @@
   let firstClick, gameOver, won;
   let flagsPlaced, cellsRevealed;
   let startTime, timerInterval;
-  let boardEl, mineCounterEl, timerEl, faceEl, insightBtnEl, copyLayoutBtnEl;
+  let boardEl, mineCounterEl, timerEl, faceEl, insightBtnEl, autoFlagBtnEl, autoOpenBtnEl, copyLayoutBtnEl;
   let showInsight = false;          // user toggle
   let pMineCache = null;             // Float32Array(rows*cols), P(cell is a mine) in [0,1]
   let pMineDirty = true;             // when true, recompute on next paint
+  let persistedFacts = null;         // Int8Array: -1 unknown, 0 sure-safe, 1 sure-mine (carried across rounds)
+  let exactFactCache = null;         // Int8Array for the latest solver pass only
+  let autoFlaggedFacts = null;       // Uint8Array: 1 when a visible flag was auto-placed from a 100% sure fact
 
   // ---------- Utilities ----------
   const inBounds = (r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
@@ -504,6 +509,58 @@
     timerInterval = null;
   }
 
+  function freshFactArray(size = rows * cols) {
+    const arr = new Int8Array(size);
+    arr.fill(-1);
+    return arr;
+  }
+
+  function freshAutoFlagArray(size = rows * cols) {
+    return new Uint8Array(size);
+  }
+
+  function resetRoundFacts() {
+    persistedFacts = freshFactArray(rows * cols);
+    exactFactCache = freshFactArray(rows * cols);
+    autoFlaggedFacts = freshAutoFlagArray(rows * cols);
+  }
+
+  function reconcilePersistedFacts() {
+    if (!(persistedFacts instanceof Int8Array) || persistedFacts.length !== rows * cols) {
+      persistedFacts = freshFactArray(rows * cols);
+    }
+    if (!(exactFactCache instanceof Int8Array) || exactFactCache.length !== rows * cols) {
+      exactFactCache = freshFactArray(rows * cols);
+    }
+    if (!(autoFlaggedFacts instanceof Uint8Array) || autoFlaggedFacts.length !== rows * cols) {
+      autoFlaggedFacts = freshAutoFlagArray(rows * cols);
+    }
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        if (revealed[r][c] || flagged[r][c]) persistedFacts[idx] = -1;
+        if (revealed[r][c] || !flagged[r][c]) autoFlaggedFacts[idx] = 0;
+      }
+    }
+  }
+
+  function mergePersistedFacts(nextExactFacts) {
+    reconcilePersistedFacts();
+    exactFactCache = new Int8Array(nextExactFacts);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        if (revealed[r][c] || flagged[r][c]) {
+          persistedFacts[idx] = -1;
+          continue;
+        }
+        if (nextExactFacts[idx] === 0 || nextExactFacts[idx] === 1) {
+          persistedFacts[idx] = nextExactFacts[idx];
+        }
+      }
+    }
+  }
+
   // ---------- Board setup ----------
   function newGame(difficultyKey = currentDifficulty) {
     currentDifficulty = difficultyKey;
@@ -521,6 +578,7 @@
     won        = false;
     flagsPlaced = 0;
     cellsRevealed = 0;
+    resetRoundFacts();
 
     stopTimer();
     timerEl.textContent = "000";
@@ -657,10 +715,94 @@
     if (gameOver) return;
     if (!inBounds(r, c) || revealed[r][c]) return;
     flagged[r][c] = !flagged[r][c];
+    autoFlaggedFacts[r * cols + c] = 0;
     flagsPlaced += flagged[r][c] ? 1 : -1;
     updateMineCounter();
     renderCell(r, c);
     invalidateInsight();
+  }
+
+  function autoFlagSureMines() {
+    if (gameOver) return false;
+    let totalChanged = 0;
+    while (true) {
+      ensureSolverFresh();
+      const changed = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const idx = r * cols + c;
+          if (revealed[r][c] || flagged[r][c]) continue;
+          if (exactFactCache[idx] !== 1) continue;
+          flagged[r][c] = true;
+          autoFlaggedFacts[idx] = 1;
+          flagsPlaced++;
+          changed.push(idx);
+        }
+      }
+      if (!changed.length) break;
+      totalChanged += changed.length;
+      updateMineCounter();
+      for (const idx of changed) {
+        renderCell(Math.floor(idx / cols), idx % cols);
+      }
+      pMineDirty = true;
+    }
+    if (!totalChanged) return false;
+    ensureSolverFresh();
+    if (showInsight) paintInsight();
+    clearAnalysis();
+    return true;
+  }
+
+  // Opens only the "frontier ring" of currently-0% cells — those that are
+  // 8-adjacent to at least one already-revealed cell. Cells behind the
+  // frontier (only reachable after this ring is opened) are deliberately
+  // left for the next click, so each press advances the board by exactly
+  // one ring of sure-safe moves.
+  //
+  // Notes on corner cases:
+  // - If a flagged cell sits in the ring, the flag is respected (skipped)
+  //   because the user might have placed it manually.
+  // - If the click would open no frontier 0% cells but the solver still
+  //   proves 0% on cells deeper in, we do nothing and surface a hint on
+  //   the button. The user then has to first open something manually (or
+  //   hit Auto Flag 100% on a deeper ring) before this button does more.
+  function autoOpenSureSafeCells() {
+    if (gameOver || firstClick) return false;
+    ensureSolverFresh();
+
+    // Collect the frontier: hidden, unflagged, currently proven 0%, and
+    // touching at least one revealed cell.
+    const frontier = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        if (revealed[r][c] || flagged[r][c]) continue;
+        if (!exactFactCache || exactFactCache[idx] !== 0) continue;
+        // 8-neighbor check against revealed cells.
+        let touchesRevealed = false;
+        for (let dr = -1; dr <= 1 && !touchesRevealed; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = r + dr, nc = c + dc;
+            if (inBounds(nr, nc) && revealed[nr][nc]) touchesRevealed = true;
+          }
+        }
+        if (touchesRevealed) frontier.push([r, c]);
+      }
+    }
+    if (!frontier.length) return false;
+
+    let openedAny = false;
+    for (const [r, c] of frontier) {
+      if (gameOver || revealed[r][c] || flagged[r][c]) continue;
+      const before = cellsRevealed;
+      reveal(r, c);
+      if (cellsRevealed > before) openedAny = true;
+      if (gameOver) break;
+    }
+    if (openedAny && showInsight && !gameOver) paintInsight();
+    return openedAny;
   }
 
   // ---------- Win / Lose ----------
@@ -814,6 +956,7 @@
       const rate = hidden.length ? Math.min(1, remaining / hidden.length) : 0;
       for (const i of hidden) fallback[i] = rate;
       pMineCache = fallback;
+      exactFactCache = freshFactArray(rows * cols);
       pMineDirty = false;
       return pMineCache;
     }
@@ -848,99 +991,92 @@
     const N = rows * cols;
     const out = new Float32Array(N);
     analysisCache = new Map();
+    analysisCacheGlobalRate = 0;
+    reconcilePersistedFacts();
 
     if (gameOver) {
+      const terminalFacts = freshFactArray(N);
       for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
         const i = r * cols + c;
         if (board[r][c] === 1) {
           out[i] = 1;
+          terminalFacts[i] = 1;
           analysisCache.set(i, [{ groundTruth: true, isMine: true }]);
+        } else {
+          terminalFacts[i] = 0;
         }
       }
+      exactFactCache = terminalFacts;
       pMineCache = out;
       return out;
     }
 
     const freeCells = [];
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-      if (revealed[r][c] || flagged[r][c]) continue;
-      freeCells.push(r * cols + c);
+    const cells = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        let state = 'hidden';
+        let number = null;
+        if (revealed[r][c]) {
+          state = 'revealed';
+          number = adjacent[r][c] || 0;
+        } else if (flagged[r][c]) {
+          state = 'flagged';
+        } else {
+          freeCells.push(idx);
+        }
+        cells.push({ row: r + 1, col: c + 1, state, number });
+      }
     }
-    const remainingMines = mineCount;
-    // (Flagged cells are passed to the solver as state:'flagged'; it
-    //  counts them as known mines itself.)
 
     if (freeCells.length === 0) {
+      exactFactCache = freshFactArray(N);
       pMineCache = out;
       return out;
     }
 
-    // Build all constraints (every revealed cell with adj > 0).
-    const constraints = [];
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-      if (!revealed[r][c] || adjacent[r][c] === 0) continue;
-      let flags = 0;
-      const involved = [];
-      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-        if (!dr && !dc) continue;
-        const nr = r + dr, nc = c + dc;
-        if (!inBounds(nr, nc)) continue;
-        if (flagged[nr][nc]) { flags++; continue; }
-        if (!revealed[nr][nc]) involved.push(nr * cols + nc);
+    const result = MinesweeperSolver.solveMinesweeper({
+      rows,
+      cols,
+      totalMines: mineCount,
+      cells,
+      priorFacts: Array.from(persistedFacts),
+    });
+    const nextExactFacts = freshFactArray(N);
+    for (let i = 0; i < result.probabilities.length; i++) {
+      const rr = Math.floor(i / cols);
+      const cc = i % cols;
+      const isRevealed = revealed[rr][cc];
+      const isFlagged = flagged[rr][cc];
+
+      if (isRevealed) {
+        out[i] = 0;
+        nextExactFacts[i] = 0;
+        continue;
       }
-      constraints.push({ involved, need: adjacent[r][c] - flags });
+      if (isFlagged) {
+        out[i] = 1;
+        nextExactFacts[i] = 1;
+        continue;
+      }
+
+      out[i] = result.probabilities[i];
+      const exactState = result.factStates && (result.factStates[i] === 0 || result.factStates[i] === 1)
+        ? result.factStates[i]
+        : (out[i] === 0 || out[i] === 1 ? out[i] : -1);
+      if (exactState === 0 || exactState === 1) nextExactFacts[i] = exactState;
+      analysisCache.set(i, [{
+        solver: true,
+        generic: true,
+        method: result.methods[i],
+        probability: out[i],
+        exactState,
+        carriedAcrossRounds: persistedFacts[i] === 0 || persistedFacts[i] === 1,
+      }]);
     }
 
-    // Always run the deterministic propagation layer first. Forced
-    // mines / safe cells are exact regardless of search size.
-    const knownMine = new Uint8Array(N);
-    const knownSafe = new Uint8Array(N);
-    for (const con of constraints) {
-      const live = con.involved.filter(v => !knownMine[v] && !knownSafe[v]);
-      const forced = con.involved.length - live.length;
-      const effNeed = con.need - forced;
-      if (live.length === 0) continue;
-      if (effNeed === 0) for (const v of live) knownSafe[v] = 1;
-      else if (effNeed === live.length) for (const v of live) knownMine[v] = 1;
-    }
-    for (let i = 0; i < N; i++) {
-      if (revealed[Math.floor(i / cols)][i % cols] || flagged[Math.floor(i / cols)][i % cols]) continue;
-      if (knownMine[i]) { out[i] = 1; analysisCache.set(i, [{ bruteForce: true, deterministic: true, isMine: true }]); }
-      else if (knownSafe[i]) { out[i] = 0; analysisCache.set(i, [{ bruteForce: true, deterministic: true, isMine: false }]); }
-    }
-
-    // Use the standalone solver for the brute-force pass. It already
-    // does deterministic propagation, component enumeration, and global
-    // weighting correctly.
-    try {
-      const cells = [];
-      for (let r = 1; r <= rows; r++) for (let c = 1; c <= cols; c++) {
-        cells.push({ row: r, col: c, state: 'hidden', number: null });
-      }
-      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-        const i = r * cols + c;
-        if (revealed[r][c]) cells[i] = { row: r + 1, col: c + 1, state: 'revealed', number: adjacent[r][c] || 0 };
-        else if (flagged[r][c]) cells[i] = { row: r + 1, col: c + 1, state: 'flagged' };
-      }
-      const result = MinesweeperSolver.solveMinesweeper({
-        rows, cols, totalMines: mineCount, cells,
-      });
-      for (let i = 0; i < result.probabilities.length; i++) {
-        out[i] = result.probabilities[i];
-        if (out[i] !== 0 && (revealed[Math.floor(i / cols)][i % cols] || flagged[Math.floor(i / cols)][i % cols])) {
-          // Don't override revealed/flagged cells.
-          out[i] = 0;
-        }
-        // Tag analysis metadata for the panel builder.
-        if (!revealed[Math.floor(i / cols)][i % cols] && !flagged[Math.floor(i / cols)][i % cols]) {
-          analysisCache.set(i, [{
-            solver: true, method: result.methods[i], probability: out[i],
-          }]);
-        }
-      }
-    } catch (err) {
-      console.error('Standalone solver failed:', err);
-    }
+    mergePersistedFacts(nextExactFacts);
 
     pMineCache = out;
     return out;
@@ -976,6 +1112,24 @@
     return `rgb(${r}, ${g}, ${b})`;
   }
 
+  function exactFactColor(state) {
+    return state === 1 ? 'rgb(255, 76, 76)' : 'rgb(72, 145, 255)';
+  }
+
+  function applyOverlayStyle(overlay, probability, exactState) {
+    if (exactState === 0 || exactState === 1) {
+      overlay.style.background = exactFactColor(exactState);
+      overlay.style.opacity = '0.96';
+      overlay.style.boxShadow = exactState === 1
+        ? 'inset 0 0 0 2px rgba(255,255,255,0.18), inset 0 0 18px rgba(120,0,0,0.45)'
+        : 'inset 0 0 0 2px rgba(255,255,255,0.18), inset 0 0 18px rgba(0,50,140,0.35)';
+      return;
+    }
+    overlay.style.background = probToColor(probability);
+    overlay.style.opacity = '0.74';
+    overlay.style.boxShadow = '';
+  }
+
   function paintInsight() {
     if (!showInsight) return;
     if (!pMineCache || pMineDirty) {
@@ -992,9 +1146,13 @@
         if (revealed[r][c] || flagged[r][c]) {
           // CSS handles flagged dim overlay; revealed get nothing.
           overlay.style.background = "";
+          overlay.style.opacity = "";
+          overlay.style.boxShadow = "";
           continue;
         }
-        overlay.style.background = probToColor(p[r * cols + c]);
+        const idx = r * cols + c;
+        const exactState = exactFactCache && exactFactCache[idx] !== undefined ? exactFactCache[idx] : -1;
+        applyOverlayStyle(overlay, p[idx], exactState);
       }
     }
   }
@@ -1002,7 +1160,10 @@
   function clearInsight() {
     for (const cellEl of boardEl.children) {
       const overlay = cellEl.querySelector(".overlay");
-      if (overlay) overlay.style.background = "";
+      if (!overlay) continue;
+      overlay.style.background = "";
+      overlay.style.opacity = "";
+      overlay.style.boxShadow = "";
     }
   }
 
@@ -1071,7 +1232,13 @@
           col: c + 1,
           state,
           number: revealed[r][c] && board[r][c] !== 1 ? adjacent[r][c] : null,
+          flagSource: flagged[r][c]
+            ? (autoFlaggedFacts && autoFlaggedFacts[idx] === 1 ? 'auto' : 'manual')
+            : null,
           probability: Number(pMineCache[idx].toFixed(6)),
+          sureFact: exactFactCache && (exactFactCache[idx] === 0 || exactFactCache[idx] === 1)
+            ? (exactFactCache[idx] === 1 ? 'mine' : 'safe')
+            : null,
         });
       }
     }
@@ -1084,6 +1251,8 @@
       flagsPlaced,
       gameOver,
       won,
+      persistedFacts: Array.from(persistedFacts || []),
+      exactFacts: Array.from(exactFactCache || []),
       cells,
     }, null, 2);
   }
@@ -1280,19 +1449,20 @@
 
       // Case 2: flagged.
       if (flagged[r][c]) {
+        const isAutoFlag = autoFlaggedFacts && autoFlaggedFacts[idx] === 1;
         const calc = `
           <div class="ap-calc">
             <div class="ap-calc-title">Calculation</div>
-            <div class="ap-calc-step">[1] You placed a flag on this cell.</div>
+            <div class="ap-calc-step">[1] ${isAutoFlag ? 'Solver proved this cell is 100% mine and auto-placed the flag.' : 'You placed a flag on this cell.'}</div>
             <div class="ap-calc-step">[2] Solver treats it as a known mine (reduces <code>need</code> on adjacent constraint cells by 1).</div>
-            <div class="ap-calc-step">[3] P(mine) = 100% by your declaration.</div>
+            <div class="ap-calc-step">[3] P(mine) = 100% ${isAutoFlag ? 'from the current board state.' : 'by your declaration.'}</div>
           </div>`;
         return `
           <div class="ap-hero">
             <span class="ap-cell">Cell ${cellLabel}</span>
             <span class="ap-pct" style="color:#ff5555">FLAG</span>
           </div>
-          <div class="ap-reason">You've marked this as a mine. The solver treats it as one when working out probabilities for other cells.</div>
+          <div class="ap-reason">${isAutoFlag ? 'This flag was placed automatically because the solver proved this cell is a mine.' : 'You\'ve marked this as a mine. The solver treats it as one when working out probabilities for other cells.'}</div>
           ${calc}`;
       }
 
@@ -1317,6 +1487,57 @@
           <div class="ap-hero">
             <span class="ap-cell">Cell ${cellLabel}</span>
             <span class="ap-pct" style="color:#9090a8">${adj}</span>
+          </div>
+          <div class="ap-reason">${reason}</div>
+          ${calc}`;
+      }
+
+      const genericRec = records.find(rec => rec.generic);
+      if (genericRec) {
+        const p = pMineCache[idx];
+        const pct = (p * 100).toFixed(1);
+        const exactState = genericRec.exactState;
+        const isPersisted = !!genericRec.carriedAcrossRounds;
+        let reason;
+        let calc;
+        if (exactState === 1) {
+          reason = isPersisted
+            ? `This cell was already proved to be a mine in an earlier round, and the current board still agrees, so it stays locked at 100%.`
+            : `The current board proves this cell is a mine, so it is carried forward as a sure fact for later rounds.`;
+          calc = `
+            <div class="ap-calc">
+              <div class="ap-calc-title">Calculation (sure fact)</div>
+              <div class="ap-calc-step">[1] Solver starts from the current board plus any sure facts kept from earlier rounds.</div>
+              <div class="ap-calc-step">[2] After recalibration, this cell is still forced to be a <b>mine</b>.</div>
+              <div class="ap-calc-step">[3] This 100% result is persisted for the next round until the cell is flagged/revealed.</div>
+            </div>`;
+        } else if (exactState === 0) {
+          reason = isPersisted
+            ? `This cell was already proved safe in an earlier round, and the current board still agrees, so it stays locked at 0%.`
+            : `The current board proves this cell is safe, so it is carried forward as a sure fact for later rounds.`;
+          calc = `
+            <div class="ap-calc">
+              <div class="ap-calc-title">Calculation (sure fact)</div>
+              <div class="ap-calc-step">[1] Solver starts from the current board plus any sure facts kept from earlier rounds.</div>
+              <div class="ap-calc-step">[2] After recalibration, this cell is still forced to be <b>safe</b>.</div>
+              <div class="ap-calc-step">[3] This 0% result is persisted for the next round until the cell is revealed.</div>
+            </div>`;
+        } else {
+          reason = isPersisted
+            ? `Earlier sure facts are still being used around this cell, but this cell itself is not certain. Its color is best-effort probability for the current round.`
+            : `This cell is not certain. Its color shows the solver's best-effort probability for the current round.`;
+          calc = `
+            <div class="ap-calc">
+              <div class="ap-calc-title">Calculation (best effort)</div>
+              <div class="ap-calc-step">[1] Solver starts from the current board plus any persisted 0%/100% facts.</div>
+              <div class="ap-calc-step">[2] It re-runs deduction/enumeration for this board state.</div>
+              <div class="ap-calc-step">[3] This cell is not forced, so it remains a probability estimate.</div>
+            </div>`;
+        }
+        return `
+          <div class="ap-hero">
+            <span class="ap-cell">Cell ${cellLabel}</span>
+            <span class="ap-pct" style="color:${pctColor(p)}">${pct}%</span>
           </div>
           <div class="ap-reason">${reason}</div>
           ${calc}`;
@@ -1506,10 +1727,10 @@
     const flag = new Set();
     const records = analysisCache.get(subjectIdx) || [];
     for (const rec of records) {
-      if (rec.globalRate) continue;
-      for (const f of rec.flagged) flag.add(f);
-      for (const ci of rec.frontier) constraint.add(ci);
-      for (const ci of rec.unknowns) {
+      if (rec.globalRate || rec.generic) continue;
+      for (const f of rec.flagged || []) flag.add(f);
+      for (const ci of rec.frontier || []) constraint.add(ci);
+      for (const ci of rec.unknowns || []) {
         if (ci !== subjectIdx) co.add(ci);
       }
     }
@@ -1586,7 +1807,6 @@
     const r = +target.dataset.r;
     const c = +target.dataset.c;
     const idx = r * cols + c;
-    console.log('handleHover', r, c, idx);
 
     // Redundant move inside same cell: keep panel positioned with cursor
     // (so it follows if user moves the mouse within the cell) but skip
@@ -1655,10 +1875,27 @@
   timerEl       = document.getElementById("timer");
   faceEl        = document.getElementById("face");
   insightBtnEl  = document.getElementById("insightBtn");
+  autoFlagBtnEl = document.getElementById("autoFlagBtn");
+  autoOpenBtnEl = document.getElementById("autoOpenBtn");
   copyLayoutBtnEl = document.getElementById("copyLayoutBtn");
   analysisEl    = document.getElementById("analysis");
   faceEl.addEventListener("click", () => newGame());
   insightBtnEl.addEventListener("click", () => setInsight(!showInsight));
+  autoFlagBtnEl.addEventListener("click", () => { autoFlagSureMines(); });
+  autoOpenBtnEl.addEventListener("click", () => {
+    const opened = autoOpenSureSafeCells();
+    if (!opened && !gameOver && !firstClick) {
+      // No frontier 0% move available right now. Briefly label the button
+      // so the user knows it didn't silently fail.
+      const original = autoOpenBtnEl.textContent;
+      autoOpenBtnEl.textContent = "No 0% next to revealed";
+      autoOpenBtnEl.disabled = true;
+      setTimeout(() => {
+        autoOpenBtnEl.textContent = original;
+        autoOpenBtnEl.disabled = false;
+      }, 900);
+    }
+  });
   copyLayoutBtnEl.addEventListener("click", () => {
     copyLayout().catch(err => {
       copyLayoutBtnEl.textContent = "Copy failed";
@@ -1723,10 +1960,24 @@
     revealed = Array.from({ length: rows }, () => Array(cols).fill(false));
     flagged = Array.from({ length: rows }, () => Array(cols).fill(false));
     adjacent = Array.from({ length: rows }, () => Array(cols).fill(0));
+    persistedFacts = freshFactArray(rows * cols);
+    exactFactCache = freshFactArray(rows * cols);
+    autoFlaggedFacts = freshAutoFlagArray(rows * cols);
     for (const c of data.cells) {
       const r = c.row - 1, cc = c.col - 1;
       if (c.state === 'revealed') { revealed[r][cc] = true; adjacent[r][cc] = c.number || 0; }
-      else if (c.state === 'flagged') { flagged[r][cc] = true; }
+      else if (c.state === 'flagged') {
+        flagged[r][cc] = true;
+        if (c.flagSource === 'auto') autoFlaggedFacts[r * cols + cc] = 1;
+      }
+      if (c.sureFact === 'mine') exactFactCache[r * cols + cc] = 1;
+      else if (c.sureFact === 'safe') exactFactCache[r * cols + cc] = 0;
+    }
+    if (Array.isArray(data.persistedFacts) && data.persistedFacts.length === rows * cols) {
+      persistedFacts = Int8Array.from(data.persistedFacts);
+    }
+    if (Array.isArray(data.exactFacts) && data.exactFacts.length === rows * cols) {
+      exactFactCache = Int8Array.from(data.exactFacts);
     }
     gameOver = false; won = false; firstClick = false;
     cellsRevealed = 0;
@@ -1737,6 +1988,17 @@
     renderBoard();
     invalidateInsight();
     return { rows, cols, mineCount, flagsPlaced, cellsRevealed };
+  };
+  window.__solverDebugState = function () {
+    ensureSolverFresh();
+    return {
+      rows,
+      cols,
+      probabilities: Array.from(pMineCache || []),
+      persistedFacts: Array.from(persistedFacts || []),
+      exactFacts: Array.from(exactFactCache || []),
+      autoFlaggedFacts: Array.from(autoFlaggedFacts || []),
+    };
   };
 })();
 </script>
