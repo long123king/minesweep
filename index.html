@@ -157,28 +157,12 @@
     background: rgba(255, 255, 255, 0.05);
   }
 
-  /* Hover analysis — outlines on cells that contributed to the subject's
-     probability. Driven by .board.analysis-active on the board element
-     (single class, no per-cell state needed). */
+  /* Hover analysis — outlines the subject cell when the panel names a
+     pattern. Driven by .board.analysis-active on the board element. */
   .board.analysis-active .cell.hover-subject {
     outline: 2px solid #ffd866;            /* gold = "you are here" */
     outline-offset: -2px;
     z-index: 3;
-  }
-  .board.analysis-active .cell.hover-co {
-    outline: 2px solid #5fd7d7;            /* cyan = sibling unknown */
-    outline-offset: -2px;
-    z-index: 2;
-  }
-  .board.analysis-active .cell.hover-constraint {
-    outline: 2px dashed #f7a05f;           /* orange dashed = constraint number */
-    outline-offset: -2px;
-    z-index: 2;
-  }
-  .board.analysis-active .cell.hover-flag {
-    outline: 2px dotted #ff5555;           /* red dotted = contributing flag */
-    outline-offset: -2px;
-    z-index: 2;
   }
 
   /* Analysis panel — absolutely positioned beside the board. It lives
@@ -254,84 +238,231 @@
     line-height: 1.55;
     color: var(--text);
   }
-  /* Step-by-step calculation block — shows how the probability was
-     computed (enumeration sizes, filter counts, the final formula). */
-  .analysis-panel .ap-calc {
-    margin-top: 10px;
+  /* ---------- Pattern block (forced 0% / 100%) ---------- */
+  /* The pattern header names the deduction technique and shows a tiny
+     ASCII diagram alongside it. Subject cell positions (between * *) are
+     rendered with the subject highlight color so the player can map the
+     diagram onto the actual board. */
+  .analysis-panel .ap-pattern {
+    margin-bottom: 10px;
     padding: 8px 10px;
     background: rgba(10, 10, 18, 0.55);
     border: 1px solid var(--border-dark);
     border-radius: 4px;
-    font-size: 11px;
-    line-height: 1.55;
   }
-  .analysis-panel .ap-calc-title {
-    font-size: 10px;
+  .analysis-panel .ap-pattern-title {
+    font-size: 12px;
     font-weight: bold;
     color: var(--accent);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 6px;
-    padding-bottom: 4px;
-    border-bottom: 1px dashed var(--border-dark);
+    margin-bottom: 4px;
+    letter-spacing: 0.2px;
   }
-  .analysis-panel .ap-calc-step {
-    color: var(--text);
-    margin: 3px 0;
-    line-height: 1.5;
-  }
-  .analysis-panel .ap-calc-step b {
-    color: var(--accent);
-    font-weight: bold;
-  }
-  .analysis-panel .ap-calc-step code {
-    background: rgba(0,0,0,0.4);
-    padding: 1px 4px;
-    border-radius: 2px;
-    font-size: 10px;
-    font-family: "Courier New", monospace;
-  }
-  .analysis-panel .ap-calc-formula {
-    margin-top: 8px;
-    padding-top: 6px;
-    border-top: 1px dashed var(--border-dark);
+  .analysis-panel .ap-pattern-diagram {
     font-family: "Courier New", monospace;
     font-size: 12px;
-    color: var(--text);
+    line-height: 1.4;
+    margin: 4px 0;
+    padding: 0;
+    color: var(--text-dim);
+    white-space: pre;
+    /* Keep the diagram left-aligned and at its natural monospace width —
+       we want it to feel like a printed cheat-sheet snippet. */
+  }
+  .analysis-panel .ap-pat-subject {
+    /* The cell that the player is hovering over — highlighted in subject
+       color so the diagram shows which position the deduction applies to. */
+    color: #ffd866;
     font-weight: bold;
   }
-  .analysis-panel .ap-calc-formula b {
-    color: var(--accent);
-    font-size: 13px;
-  }
-  .analysis-panel .ap-stats {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-dark);
+  .analysis-panel .ap-pattern-blurb {
     font-size: 11px;
+    line-height: 1.5;
     color: var(--text-dim);
+    font-style: italic;
+    margin-top: 4px;
   }
-  .analysis-panel .ap-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-dark);
+  .analysis-panel .ap-pattern-persist {
     font-size: 10px;
     color: var(--text-dim);
+    font-style: italic;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border-dark);
   }
-  .analysis-panel .ap-legend span {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+
+  /* ---------- Tutorial (collapsible) ---------- */
+  /* The tutorial lives under the help line as a native <details> element
+     so it requires no JS to open/close and stays out of the way until
+     the player wants to learn. The summary row is the only visible piece
+     when collapsed. */
+  .tutorial {
+    margin-top: 12px;
+    text-align: left;
+    border-top: 1px dashed var(--border-dark);
+    padding-top: 8px;
   }
-  .analysis-panel .ap-legend i {
+  .tutorial > summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: bold;
+    list-style: none;
+    user-select: none;
+    -webkit-user-select: none;
+    /* Default browser markers are too tall for our compact style. */
+    padding: 2px 0;
+  }
+  .tutorial > summary::-webkit-details-marker { display: none; }
+  .tutorial > summary::before {
+    content: "▸ ";
     display: inline-block;
-    width: 10px;
-    height: 10px;
+    transition: transform 0.15s ease;
+    margin-right: 4px;
+  }
+  .tutorial[open] > summary::before {
+    content: "▾ ";
+  }
+  .tutorial > summary:hover {
+    color: #ffffff;
+  }
+  .tutorial-body {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(10, 10, 18, 0.55);
+    border: 1px solid var(--border-dark);
+    border-radius: 4px;
+  }
+  .tutorial-intro {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .tutorial-pattern {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-dark);
+  }
+  .tutorial-pattern:first-of-type {
+    border-top: none;
+    padding-top: 0;
+  }
+  .tutorial-pattern-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .tutorial-pattern-diagram {
+    /* Match the actual board cell style so the diagram reads as a
+       literal snippet of the playing field rather than abstract glyphs. */
+    --tut-cell: 24px;
+    --tut-gap: 2px;
+    margin: 6px 0;
+    padding: 8px 10px;
+    background: var(--bg);
+    border-radius: 3px;
+    color: var(--text);
+    white-space: pre;
+    overflow-x: auto;
+    /* <pre> defaults to a 1em line-height which adds vertical slack
+       between cell rows. Collapse it so the cells sit on a tight grid;
+       each .tut-cell sets its own line-height: 1 internally. */
+    line-height: 0;
+    /* <pre> also defaults to monospace — undo it so the cell content
+       doesn't pick up Courier when it shouldn't. */
+    font-family: inherit;
+    font-size: 12px;
+  }
+  /* A single cell in the tutorial grid. Behaves like .cell on the real
+     board — same colors, borders, font — so users can map the diagram
+     onto the actual playing field at a glance. */
+  .tut-cell {
+    display: inline-block;
+    width: var(--tut-cell);
+    height: var(--tut-cell);
+    background: var(--hidden);
+    border: 2px solid var(--border-light);
+    border-bottom-color: var(--border-dark);
+    border-right-color: var(--border-dark);
     border-radius: 2px;
-    border: 1px solid currentColor;
+    vertical-align: top;
+    font-family: "Courier New", monospace;
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 1;
+    text-align: center;
+    position: relative;
+    margin-right: var(--tut-gap);
+  }
+  /* Last cell of each row should drop the right margin so the row
+     can be wrapped (the <pre> handles rows via \n). */
+  .tut-cell.tut-eol { margin-right: 0; }
+  /* Revealed numbered clue — match .cell.revealed styling. */
+  .tut-cell.tut-revealed {
+    background: var(--revealed);
+    border: 1px solid var(--border-dark);
+    color: var(--text);
+  }
+  /* Match the actual clue-number colors so the diagram reads as
+     "this is literally the playing field". */
+  .tut-cell.tut-n1 { color: #5fb3f7; }
+  .tut-cell.tut-n2 { color: #7ec97e; }
+  .tut-cell.tut-n3 { color: #f76c5f; }
+  .tut-cell.tut-n4 { color: #b78ef7; }
+  /* Flagged cell — show 🚩 on the hidden background. */
+  .tut-cell.tut-flagged {
+    background: var(--hidden);
+  }
+  .tut-cell.tut-flagged::before {
+    content: "⚑";
+    color: #ff5555;
+    font-size: 14px;
+    line-height: 1;
+  }
+  /* Empty unrevealed — pure hidden background, no glyph. */
+  .tut-cell.tut-empty { color: transparent; }
+  /* Exact-state overlay — match the insight mode exact colors so the
+     subject reads as "100% mine" (red) or "0% mine" (blue). */
+  .tut-cell.tut-mine,
+  .tut-cell.tut-safe {
+    background: var(--hidden);
+    border: 2px solid var(--border-light);
+    border-bottom-color: var(--border-dark);
+    border-right-color: var(--border-dark);
+  }
+  .tut-cell.tut-mine {
+    /* 100% mine — same red as exactFactColor(1) on the real board. */
+    background: rgb(255, 76, 76);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18),
+                inset 0 0 18px rgba(120, 0, 0, 0.45);
+  }
+  .tut-cell.tut-safe {
+    /* 0% mine — same blue as exactFactColor(0) on the real board. */
+    background: rgb(72, 145, 255);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18),
+                inset 0 0 18px rgba(0, 50, 140, 0.35);
+  }
+  /* Subject marker — small star in the bottom-right corner so it doesn't
+     fight the cell content (the cell face already shows the verdict). */
+  .tut-cell.tut-subject-mark::after {
+    content: "★";
+    position: absolute;
+    bottom: 1px;
+    right: 2px;
+    font-size: 8px;
+    line-height: 1;
+    color: #ffd866;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.85);
+    font-family: "Courier New", monospace;
+    font-weight: bold;
+  }
+  .tutorial-pattern-blurb {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-dim);
   }
 
   /* On narrow viewports, drop the panel below the board instead of
@@ -396,6 +527,27 @@
     color: #0a0a12;
     border-color: var(--accent);
   }
+  .btn-icon {
+    /* SVG icons sit inline with the label. 14×14 box, vertically centered
+       against the 13px label text so the glyphs read on the same line
+       without their own bbox shifting the baseline. */
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    vertical-align: -2px;
+    /* SVG inherits color via currentColor; ensure nothing overrides it. */
+    color: inherit;
+    /* Prevent the icon from being part of the user text-selection —
+       drag-selecting across the button should only grab the label. */
+    user-select: none;
+    -webkit-user-select: none;
+    /* SVG must size from its width/height attrs, not shrink to 0 in flex. */
+    flex-shrink: 0;
+  }
+  /* When the button is in the active ON state, the accent background is
+     dark; the icon stays legible because its strokes use currentColor,
+     which inherits from the button's text color (set to #0a0a12 above). */
 
   .help {
     margin-top: 10px;
@@ -441,14 +593,102 @@
     </div>
     <div class="footer" id="difficulty"></div>
     <div class="footer" id="tools">
-      <button class="btn" id="insightBtn" aria-pressed="false">Insight: OFF</button>
-      <button class="btn" id="autoFlagBtn" title="Flag every cell the solver currently proves is 100% mine">Auto Flag 100%</button>
-      <button class="btn" id="autoOpenBtn" title="Open one ring of 0% cells (those touching the current revealed area). Click again to advance.">Auto Open 0%</button>
-      <button class="btn" id="copyLayoutBtn" title="Copy board state and current probability for every cell">Copy Layout</button>
+      <button class="btn" id="insightBtn" aria-pressed="false">
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <!-- Eye: almond outline + iris + pupil. Says "see through the board." -->
+          <path d="M2 12 C5 6, 9 4, 12 4 C15 4, 19 6, 22 12 C19 18, 15 20, 12 20 C9 20, 5 18, 2 12 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/>
+          <circle cx="12" cy="12" r="1.2" fill="currentColor"/>
+        </svg>
+        <span class="btn-label">Insight: OFF</span>
+      </button>
+      <button class="btn" id="autoFlagBtn" title="Flag every cell the solver currently proves is 100% mine">
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <!-- Target: concentric rings + crosshair. Says "exactly 100% certain." -->
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+          <circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+          <circle cx="12" cy="12" r="1.6" fill="currentColor"/>
+          <line x1="12" y1="2" x2="12" y2="5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="12" y1="19" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="2" y1="12" x2="5" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="19" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="btn-label">Auto Flag 100%</span>
+      </button>
+      <button class="btn" id="autoOpenBtn" title="Open one ring of 0% cells (those touching the current revealed area). Click again to advance.">
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <!-- Sparkle: 4-point star + small companion sparkle. Says "reveal" / "clear." -->
+          <path d="M12 2 L13.6 9 L20 10.5 L13.6 12 L12 19 L10.4 12 L4 10.5 L10.4 9 Z" fill="currentColor"/>
+          <path d="M19 17 L19.7 19 L21.5 19.5 L19.7 20 L19 22 L18.3 20 L16.5 19.5 L18.3 19 Z" fill="currentColor"/>
+        </svg>
+        <span class="btn-label">Auto Open 0%</span>
+      </button>
+      <button class="btn" id="copyLayoutBtn" title="Copy board state and current probability for every cell">
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <!-- Clipboard: rounded rectangle with a top clip + three content lines. -->
+          <path d="M6 4 H10 V3 H14 V4 H18 V21 H6 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          <rect x="9" y="2" width="6" height="3" rx="0.5" fill="currentColor"/>
+          <line x1="9" y1="11" x2="15" y2="11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="9" y1="15" x2="15" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="9" y1="19" x2="13" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="btn-label">Copy Layout</span>
+      </button>
     </div>
     <div class="help">
-      Left-click: reveal · Right-click / long-press: flag · Click number: chord reveal · Insight: heat-map unrevealed cells by mine probability · Hover a cell: see how its probability was calculated
+      Left-click: reveal · Right-click / long-press: flag · Click number: chord reveal · Insight: heat-map unrevealed cells by mine probability · Hover a 100% or 0% cell to see the pattern that proves it
     </div>
+    <details class="tutorial">
+      <summary>Fundamental patterns (how each forced cell is proved)</summary>
+      <div class="tutorial-body">
+        <div class="tutorial-intro">Every blue (0%) or red (100%) cell on the board comes from one of the patterns below. Hover any colored cell to see which pattern applies to it. Diagrams are drawn in the same style as Insight mode: red cells are 100% mine, blue cells are 0% mine, the cell being proved carries a small <span class="tut-subject">★</span> marker.</div>
+
+        <div class="tutorial-pattern">
+          <div class="tutorial-pattern-title">1. Single-clue forced mine</div>
+          <pre class="tutorial-pattern-diagram"><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span>
+<span class="tut-cell tut-empty"></span><span class="tut-cell tut-revealed tut-n1">1</span><span class="tut-cell tut-mine tut-subject-mark"></span>
+<span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span></pre>
+          <div class="tutorial-pattern-blurb">A number N has exactly N unrevealed neighbors left — every one of them must be a mine. Here the "1" has only one unrevealed neighbor, so it must be the mine.</div>
+        </div>
+
+        <div class="tutorial-pattern">
+          <div class="tutorial-pattern-title">2. Single-clue safe (satisfied clue)</div>
+          <pre class="tutorial-pattern-diagram"><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span>
+<span class="tut-cell tut-flagged"></span><span class="tut-cell tut-revealed tut-n1">1</span><span class="tut-cell tut-safe tut-subject-mark"></span>
+<span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span></pre>
+          <div class="tutorial-pattern-blurb">A number N already has N mines counted among its neighbors (flags or known mines). All remaining unrevealed neighbors are safe. The flag already accounts for the "1", so the marked cell must be safe.</div>
+        </div>
+
+        <div class="tutorial-pattern">
+          <div class="tutorial-pattern-title">3. Subset difference → mine</div>
+          <pre class="tutorial-pattern-diagram"><span class="tut-cell tut-revealed tut-n1">1</span><span class="tut-cell tut-revealed tut-n2">2</span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span>
+<span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-mine tut-subject-mark"></span><span class="tut-cell tut-empty tut-eol"></span>
+<span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span></pre>
+          <div class="tutorial-pattern-blurb">Clue B's neighbors are a superset of clue A's. If B needs one more mine than A and the cells only B touches (B\A) equal that difference, every cell in B\A is a mine. Here the marked cell touches "2" but not "1" — it's the forced mine.</div>
+        </div>
+
+        <div class="tutorial-pattern">
+          <div class="tutorial-pattern-title">4. Subset difference → safe</div>
+          <pre class="tutorial-pattern-diagram"><span class="tut-cell tut-safe tut-subject-mark"></span><span class="tut-cell tut-revealed tut-n1">1</span><span class="tut-cell tut-revealed tut-n2">2</span><span class="tut-cell tut-empty tut-eol"></span>
+<span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span>
+<span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span></pre>
+          <div class="tutorial-pattern-blurb">Mirror of #3, applied to the smaller clue A. The marked cell touches "1" but not "2". Since "1" is satisfied by revealed neighbors, the marked cell is safe.</div>
+        </div>
+
+        <div class="tutorial-pattern">
+          <div class="tutorial-pattern-title">5. Tank / swap (equal subset)</div>
+          <pre class="tutorial-pattern-diagram"><span class="tut-cell tut-empty"></span><span class="tut-cell tut-revealed tut-n1">1</span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-revealed tut-n1">1</span><span class="tut-cell tut-empty tut-eol"></span>
+<span class="tut-cell tut-mine tut-subject-mark"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span>
+<span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty"></span><span class="tut-cell tut-empty tut-eol"></span></pre>
+          <div class="tutorial-pattern-blurb">Two clues with the same number touch the same count of unrevealed cells but in different shapes. The cells only the left "1" touches (including the marked cell) are mines; the cells only the right "1" touches are safe.</div>
+        </div>
+
+        <div class="tutorial-pattern">
+          <div class="tutorial-pattern-title">Beyond these — global reasoning</div>
+          <div class="tutorial-pattern-blurb">When no local pattern forces a cell, the solver falls back to global mine-count accounting (how many mines remain vs. how many unrevealed cells). Cells colored in the middle of the gradient (not red or blue) are those: read the number, and use the color as a rough guide.</div>
+        </div>
+      </div>
+    </details>
   </div>
 
 <script src="solver.js"></script>
@@ -794,14 +1034,25 @@
     if (!frontier.length) return false;
 
     let openedAny = false;
-    for (const [r, c] of frontier) {
-      if (gameOver || revealed[r][c] || flagged[r][c]) continue;
-      const before = cellsRevealed;
-      reveal(r, c);
-      if (cellsRevealed > before) openedAny = true;
-      if (gameOver) break;
+    suppressInsightPaint = true;  // each reveal() invalidates; skip per-reveal paint+solve
+    try {
+      for (const [r, c] of frontier) {
+        if (gameOver || revealed[r][c] || flagged[r][c]) continue;
+        const before = cellsRevealed;
+        reveal(r, c);
+        if (cellsRevealed > before) openedAny = true;
+        if (gameOver) break;
+      }
+    } finally {
+      suppressInsightPaint = false;
     }
-    if (openedAny && showInsight && !gameOver) paintInsight();
+    // Clear any stale hover-analysis marks accumulated during the burst.
+    clearAnalysis();
+    if (openedAny && showInsight && !gameOver) {
+      // Run the solver exactly once on the post-burst state, then paint.
+      ensureSolverFresh();
+      paintInsight();
+    }
     return openedAny;
   }
 
@@ -1171,7 +1422,7 @@
     showInsight = !!on;
     boardEl.classList.toggle("insight-on", showInsight);
     insightBtnEl.classList.toggle("active", showInsight);
-    insightBtnEl.textContent = showInsight ? "Insight: ON" : "Insight: OFF";
+    setBtnLabel(insightBtnEl, showInsight ? "Insight: ON" : "Insight: OFF");
     insightBtnEl.setAttribute("aria-pressed", showInsight ? "true" : "false");
     if (showInsight) {
       pMineDirty = true;
@@ -1184,6 +1435,11 @@
   // Mark insight cache stale on any state change while the toggle is on.
   function invalidateInsight() {
     pMineDirty = true;
+    // Bulk operations (e.g. autoOpenSureSafeCells loops) defer insight
+    // painting and re-solving until they finish. Re-running the solver on
+    // every cell-reveal inside the loop is what made Auto Open 0% feel
+    // frozen when Insight was on — see autoOpenSureSafeCells below.
+    if (suppressInsightPaint) return;
     if (showInsight) paintInsight();
     // Analysis is keyed off the same solver state — any change invalidates
     // the cached per-cell records. Clear the live panel so the user
@@ -1204,6 +1460,7 @@
   let analysisEl = null;          // the floating panel
   let analysisSubjectIdx = -1;    // cell index currently being analyzed
   let analysisActive = false;     // whether marks are currently painted
+  let suppressInsightPaint = false; // when true, invalidateInsight skips paint+solve (used by bulk operations to avoid re-solving on every reveal)
 
   function ensureSolverFresh() {
     if (!pMineCache || pMineDirty) {
@@ -1275,10 +1532,10 @@
       area.remove();
       if (!copied) throw new Error("Clipboard copy failed");
     }
-    copyLayoutBtnEl.textContent = "Copied!";
+    setBtnLabel(copyLayoutBtnEl, "Copied!");
     clearTimeout(copyLayoutBtnEl._resetTimer);
     copyLayoutBtnEl._resetTimer = setTimeout(() => {
-      copyLayoutBtnEl.textContent = "Copy Layout";
+      setBtnLabel(copyLayoutBtnEl, "Copy Layout");
     }, 1200);
   }
 
@@ -1330,31 +1587,216 @@
     return n === 1 ? `1 ${singular}` : `${n} ${plural || singular + 's'}`;
   }
 
-  // Plain-English reasoning generators. One sentence per scenario.
-  // We pick the most informative reasoning that fits the data.
+  // ---------- Fundamental Minesweeper solving patterns ----------
+  // Each pattern is a named technique that solves a cell by local constraint
+  // arithmetic. Hover analysis uses these to label forced 0%/100% deductions
+  // so the player learns the language; the tutorial at the bottom of the
+  // page shows the same names with diagrams.
+  //
+  // ID keys:
+  //   "single-mine"     — one clue with one unrevealed neighbor → that cell is a mine
+  //   "single-safe"     — one clue already satisfied (by flags / known mines / revealed numbers) → its other unrevealed neighbors are safe
+  //   "subset-mine"     — two clues share a subset of neighbors; the cells only the larger clue touches must be mines
+  //   "subset-safe"     — two clues share a subset of neighbors; the cells only the smaller clue touches must be safe
+  //   "subset-tank"     — equal-sized subset difference; cells in A\B and B\A must both be mines
+  //
+  // Each pattern carries: title (one-line name), diagram (compact ASCII art),
+  // blurb (short teaching line) used in both the hover panel and the tutorial.
+  const PATTERNS = {
+    "single-mine": {
+      title: "Single-clue forced mine",
+      blurb: "A number N has exactly N unrevealed neighbors left — every one of them must be a mine.",
+      diagram: " 1 \n*M*",
+    },
+    "single-safe": {
+      title: "Single-clue safe (satisfied)",
+      blurb: "A number N already has N mines accounted for among its neighbors (flags or known mines). All remaining unrevealed neighbors are safe.",
+      diagram: " 1 \n?  ",
+    },
+    "subset-mine": {
+      title: "Subset difference → mine",
+      blurb: "Clue B's neighbors are a superset of clue A's. If B needs one more mine than A and the size of B\\A equals that difference, every cell only B touches is a mine.",
+      diagram: "1  2\n*A B*\n *M*",
+    },
+    "subset-safe": {
+      title: "Subset difference → safe",
+      blurb: "Clue B's neighbors are a superset of clue A's, and the difference matches the difference in needed mines. Cells only A touches are safe.",
+      diagram: "2  3\n*A B*\n *S*",
+    },
+    "subset-tank": {
+      title: "Tank / swap (subset equal)",
+      blurb: "Two clues touch the same number of unrevealed cells but in different patterns. The cells only one of them touches must be mines; the cells only the other touches are safe.",
+      diagram: "1  1\n*A B*\n *M*",
+    },
+  };
 
-  function reasonForced(records, idx) {
-    // 100% or 0%: a single constraint forces this cell.
-    // Find the smallest, cleanest such constraint and explain it.
+  // Classify a forced 0% / 100% deduction into a named pattern. Walks the
+  // constraint records for the subject cell and returns the first pattern
+  // match with a one-sentence reason that names the clue(s) involved.
+  // Returns null when no forced deduction applies (caller falls back to
+  // a generic "best-effort probability" message).
+  function detectForcedPattern(records, subjectIdx) {
+    // Collect every constraint that mentions the subject cell. We don't
+    // pre-trust a single record — multi-record cells (sitting in multiple
+    // components) need the union.
+    const subjectCons = [];
     for (const rec of records) {
       for (const con of rec.constraints) {
-        if (!con.vars.includes(rec.subjectVarIdx)) continue;
-        if (con.vars.length !== 1) continue; // only single-unknown constraints
-        if (con.need !== 0 && con.need !== 1) continue;
-        const fLabel = idxToLabel(con.frontierIdx);
-        const num = con.need + con.flags;
-        if (con.need === 1) {
-          return `The ${num} at ${fLabel} has no other unrevealed neighbors — its mine count must come from you, so you are a mine.`;
+        if (!con.vars.includes(subjectIdx)) continue;
+        subjectCons.push(con);
+      }
+    }
+    if (subjectCons.length === 0) return null;
+
+    // Pattern: single-clue forced mine / safe.
+    // Pick the most explanatory single-clue constraint (smallest vars, then
+    // fewest flags). If any clause has need 1 and only 1 unrevealed neighbor
+    // → forced mine. If any clause has need 0 (regardless of flag count)
+    // → forced safe.
+    const singleCons = subjectCons.filter(con => con.vars.length === 1);
+    // Forced mine: a clue that needs exactly 1 mine and its only unrevealed
+    // neighbor is the subject.
+    const mineCons = singleCons.filter(con => con.need === 1);
+    if (mineCons.length > 0) {
+      // Prefer the constraint with the fewest flags (cleaner explanation).
+      mineCons.sort((a, b) => a.flags - b.flags);
+      const con = mineCons[0];
+      const fLabel = idxToLabel(con.frontierIdx);
+      const num = con.need + con.flags;
+      return {
+        patternId: "single-mine",
+        reason: `Clue <b>${num}</b> at ${fLabel} has only <b>${con.vars.length}</b> unrevealed neighbor left and still needs <b>${con.need}</b> mine${con.need === 1 ? '' : 's'} — that neighbor is you.`,
+      };
+    }
+    // Forced safe: a clue whose mine count is fully satisfied. The subject
+    // appears in con.vars, con.need === 0.
+    const safeCons = singleCons.filter(con => con.need === 0);
+    if (safeCons.length > 0) {
+      // Prefer cleanest: smallest flags, smallest number.
+      safeCons.sort((a, b) => a.flags - b.flags || (a.need + a.flags) - (b.need + b.flags));
+      const con = safeCons[0];
+      const fLabel = idxToLabel(con.frontierIdx);
+      const num = con.need + con.flags;
+      const how = con.flags > 0
+        ? `${plural(con.flags, 'flag')} already count toward the ${num}`
+        : `its mine count is already satisfied by known mines`;
+      return {
+        patternId: "single-safe",
+        reason: `Clue <b>${num}</b> at ${fLabel}: ${how} — no extra mine needed, so its remaining unrevealed neighbor (you) is safe.`,
+      };
+    }
+
+    // Pattern: subset difference (two clues share some neighbors).
+    // We need at least two constraints that both mention the subject.
+    if (subjectCons.length >= 2) {
+      // Try every ordered pair (A, B) where A's vars are a proper subset
+      // of B's vars (or the other way). Filter to pairs that produce a
+      // meaningful diff.
+      for (let i = 0; i < subjectCons.length; i++) {
+        for (let j = 0; j < subjectCons.length; j++) {
+          if (i === j) continue;
+          const a = subjectCons[i];
+          const b = subjectCons[j];
+          const aSet = new Set(a.vars);
+          // Proper subset: A's vars are a strict subset of B's vars AND
+          // both touch the subject cell.
+          if (!a.vars.includes(subjectIdx) || !b.vars.includes(subjectIdx)) continue;
+          if (a.vars.length >= b.vars.length) continue;
+          if (!a.vars.every(v => b.vars.includes(v))) continue;
+          const bOnly = b.vars.filter(v => !aSet.has(v));
+          const diff = b.need - a.need;
+          // Forced mines on B\A when diff == |B\A| (each cell in B\A must
+          // hold a mine).
+          if (diff === bOnly.length && diff > 0) {
+            const aLabel = idxToLabel(a.frontierIdx);
+            const bLabel = idxToLabel(b.frontierIdx);
+            const aNum = a.need + a.flags;
+            const bNum = b.need + b.flags;
+            // Is the subject cell in B\A? Then it IS the forced mine cell.
+            // Otherwise, the subject is in A and we report that cells
+            // outside A but inside B are forced mines (different from the
+            // subject's own classification, so only relevant when subject
+            // is in B\A).
+            if (bOnly.includes(subjectIdx)) {
+              return {
+                patternId: "subset-mine",
+                reason: `Clues <b>${aNum}</b> at ${aLabel} and <b>${bNum}</b> at ${bLabel} share all neighbors except ${plural(bOnly.length, 'cell')}. B needs exactly ${diff} more mine${diff === 1 ? '' : 's'} than A and B\\A has ${bOnly.length} cells — every one is a mine, including you.`,
+              };
+            }
+          }
+          // Forced safe on A\B? Same algebra, different direction.
+          // A is the smaller constraint; A\B cells are forced safe when
+          // (a.need - b.need) == |A\B|.
+          const aOnly = a.vars.filter(v => !b.vars.includes(v));
+          const diff2 = a.need - b.need;
+          if (diff2 === aOnly.length && diff2 > 0) {
+            if (aOnly.includes(subjectIdx)) {
+              const aLabel = idxToLabel(a.frontierIdx);
+              const bLabel = idxToLabel(b.frontierIdx);
+              const aNum = a.need + a.flags;
+              const bNum = b.need + b.flags;
+              return {
+                patternId: "subset-safe",
+                reason: `Clues <b>${aNum}</b> at ${aLabel} and <b>${bNum}</b> at ${bLabel} share all neighbors except ${plural(aOnly.length, 'cell')}. A needs exactly ${diff2} more mine${diff2 === 1 ? '' : 's'} than B and A\\B has ${aOnly.length} cells — every one is safe, including you.`,
+              };
+            }
+          }
         }
-        if (con.need === 0 && con.flags === 0) {
-          return `The ${num} at ${fLabel} has its mine count already satisfied by other neighbors — you are safe.`;
-        }
-        if (con.need === 0 && con.flags > 0) {
-          return `The ${num} at ${fLabel} has its ${plural(con.flags, 'flag')} counting toward the total — no mine needed here, you are safe.`;
+      }
+      // Tank / swap: |A.vars| == |B.vars| but the var sets differ. Then
+      // (A\B) cells are mines and (B\A) cells are safe, regardless of need
+      // (provided A.need + B.need = |A.vars| — i.e. combined need fills
+      // every slot). Actually the tank condition is: A.vars ≠ B.vars,
+      // |A.vars| == |B.vars|, A.need == B.need. Then (A\B)∪(B\A) holds the
+      // mines, and the two sides split evenly.
+      for (let i = 0; i < subjectCons.length; i++) {
+        for (let j = i + 1; j < subjectCons.length; j++) {
+          const a = subjectCons[i];
+          const b = subjectCons[j];
+          if (a.vars.length !== b.vars.length) continue;
+          if (a.need !== b.need) continue;
+          const aSet = new Set(a.vars);
+          const symmetricDiff = a.vars.filter(v => !aSet.has(v)).concat(b.vars.filter(v => !aSet.has(v)));
+          if (symmetricDiff.length === 0) continue; // identical vars — would already be handled above
+          // The subject is forced by the symmetric difference: if it's in
+          // A\B it's a mine, if it's in B\A it's safe.
+          if (a.vars.includes(subjectIdx) && !b.vars.includes(subjectIdx)) {
+            const aLabel = idxToLabel(a.frontierIdx);
+            const bLabel = idxToLabel(b.frontierIdx);
+            const num = a.need + a.flags;
+            return {
+              patternId: "subset-tank",
+              reason: `Clues <b>${num}</b> at ${aLabel} and ${bLabel} touch the same number of unrevealed cells but different sets. The cells only ${aLabel} touches (including you) are mines; cells only ${bLabel} touches are safe.`,
+            };
+          }
+          if (b.vars.includes(subjectIdx) && !a.vars.includes(subjectIdx)) {
+            const aLabel = idxToLabel(a.frontierIdx);
+            const bLabel = idxToLabel(b.frontierIdx);
+            const num = a.need + a.flags;
+            return {
+              patternId: "subset-tank",
+              reason: `Clues <b>${num}</b> at ${aLabel} and ${bLabel} touch the same number of unrevealed cells but different sets. The cells only ${bLabel} touches (including you) are safe; cells only ${aLabel} touches are mines.`,
+            };
+          }
         }
       }
     }
-    return null;
+
+    // No clean single-clue or subset pattern matched, but the cell is
+    // still forced (e.g. a chain of deductions we don't surface). Fall
+    // back to a generic "forced" message.
+    return {
+      patternId: null,
+      reason: `This cell is forced by a combination of clues — no single pattern applies, but every valid mine placement agrees on this result.`,
+    };
+  }
+
+  function reasonForced(records, idx) {
+    // Legacy entry point kept for backwards compatibility with tests that
+    // import reason text. New code should call detectForcedPattern and use
+    // .reason directly.
+    const pat = detectForcedPattern(records, idx);
+    return pat ? pat.reason : null;
   }
 
   function reasonPartial(rec) {
@@ -1416,389 +1858,106 @@
     return n;
   }
 
-  // Build the simple analysis panel content. Returns innerHTML.
-  // Layout: hero (cell + percentage), plain-English reason, compact
-  // stats, legend.
+  // Build the analysis panel HTML for a cell. Caller is responsible for
+  // gating — by the time we get here we know the cell is hidden, unflagged,
+  // non-terminal, and matches a fundamental pattern. So this function only
+  // needs to render the forced-cell pattern panel.
   function buildAnalysis(r, c) {
       const idx = r * cols + c;
-      const records = analysisCache.get(idx) || [];
       const cellLabel = idxToLabel(idx);
-
-      // Case 1: game over → ground truth.
-      if (gameOver) {
-        const isMine = board[r][c] === 1;
-        const pctText = isMine ? 'MINE' : 'SAFE';
-        const pctColorVal = isMine ? '#ff5555' : '#5fd7d7';
-        const reason = isMine
-          ? `Game over — this cell contains a mine.`
-          : `Game over — this cell is safe.`;
-        const calc = `
-          <div class="ap-calc">
-            <div class="ap-calc-title">Calculation</div>
-            <div class="ap-calc-step">[1] Board is in terminal state — all mines are revealed.</div>
-            <div class="ap-calc-step">[2] Cell ${cellLabel} = <b>${isMine ? 'mine' : 'safe'}</b> (known exactly).</div>
-          </div>`;
-        return `
-          <div class="ap-hero">
-            <span class="ap-cell">Cell ${cellLabel}</span>
-            <span class="ap-pct" style="color:${pctColorVal}">${pctText}</span>
-          </div>
-          <div class="ap-reason">${reason}</div>
-          ${calc}`;
-      }
-
-      // Case 2: flagged.
-      if (flagged[r][c]) {
-        const isAutoFlag = autoFlaggedFacts && autoFlaggedFacts[idx] === 1;
-        const calc = `
-          <div class="ap-calc">
-            <div class="ap-calc-title">Calculation</div>
-            <div class="ap-calc-step">[1] ${isAutoFlag ? 'Solver proved this cell is 100% mine and auto-placed the flag.' : 'You placed a flag on this cell.'}</div>
-            <div class="ap-calc-step">[2] Solver treats it as a known mine (reduces <code>need</code> on adjacent constraint cells by 1).</div>
-            <div class="ap-calc-step">[3] P(mine) = 100% ${isAutoFlag ? 'from the current board state.' : 'by your declaration.'}</div>
-          </div>`;
-        return `
-          <div class="ap-hero">
-            <span class="ap-cell">Cell ${cellLabel}</span>
-            <span class="ap-pct" style="color:#ff5555">FLAG</span>
-          </div>
-          <div class="ap-reason">${isAutoFlag ? 'This flag was placed automatically because the solver proved this cell is a mine.' : 'You\'ve marked this as a mine. The solver treats it as one when working out probabilities for other cells.'}</div>
-          ${calc}`;
-      }
-
-      // Case 3: revealed.
-      if (revealed[r][c]) {
-        const adj = adjacent[r][c];
-        const reason = adj === 0
-          ? `Revealed cell — no adjacent mines. It contributes zero information about neighbors beyond being empty.`
-          : `Revealed ${adj} — this cell's number is one of the constraints that determines probabilities for its unrevealed neighbors (highlighted in orange when you hover them).`;
-        const calc = adj === 0
-          ? `<div class="ap-calc">
-              <div class="ap-calc-title">Calculation</div>
-              <div class="ap-calc-step">[1] Cell is revealed with adj = 0 (no adjacent mines).</div>
-              <div class="ap-calc-step">[2] It is NOT a frontier cell (no unrevealed neighbors need constraints).</div>
-            </div>`
-          : `<div class="ap-calc">
-              <div class="ap-calc-title">Calculation</div>
-              <div class="ap-calc-step">[1] Cell is revealed with adj = ${adj}.</div>
-              <div class="ap-calc-step">[2] This constraint equation will be used by the solver: <code>adj = sum of mines in its unrevealed neighbors</code>.</div>
-            </div>`;
-        return `
-          <div class="ap-hero">
-            <span class="ap-cell">Cell ${cellLabel}</span>
-            <span class="ap-pct" style="color:#9090a8">${adj}</span>
-          </div>
-          <div class="ap-reason">${reason}</div>
-          ${calc}`;
-      }
-
+      const records = analysisCache.get(idx) || [];
       const genericRec = records.find(rec => rec.generic);
-      if (genericRec) {
-        const p = pMineCache[idx];
-        const pct = (p * 100).toFixed(1);
-        const exactState = genericRec.exactState;
-        const isPersisted = !!genericRec.carriedAcrossRounds;
-        let reason;
-        let calc;
-        if (exactState === 1) {
-          reason = isPersisted
-            ? `This cell was already proved to be a mine in an earlier round, and the current board still agrees, so it stays locked at 100%.`
-            : `The current board proves this cell is a mine, so it is carried forward as a sure fact for later rounds.`;
-          calc = `
-            <div class="ap-calc">
-              <div class="ap-calc-title">Calculation (sure fact)</div>
-              <div class="ap-calc-step">[1] Solver starts from the current board plus any sure facts kept from earlier rounds.</div>
-              <div class="ap-calc-step">[2] After recalibration, this cell is still forced to be a <b>mine</b>.</div>
-              <div class="ap-calc-step">[3] This 100% result is persisted for the next round until the cell is flagged/revealed.</div>
-            </div>`;
-        } else if (exactState === 0) {
-          reason = isPersisted
-            ? `This cell was already proved safe in an earlier round, and the current board still agrees, so it stays locked at 0%.`
-            : `The current board proves this cell is safe, so it is carried forward as a sure fact for later rounds.`;
-          calc = `
-            <div class="ap-calc">
-              <div class="ap-calc-title">Calculation (sure fact)</div>
-              <div class="ap-calc-step">[1] Solver starts from the current board plus any sure facts kept from earlier rounds.</div>
-              <div class="ap-calc-step">[2] After recalibration, this cell is still forced to be <b>safe</b>.</div>
-              <div class="ap-calc-step">[3] This 0% result is persisted for the next round until the cell is revealed.</div>
-            </div>`;
-        } else {
-          reason = isPersisted
-            ? `Earlier sure facts are still being used around this cell, but this cell itself is not certain. Its color is best-effort probability for the current round.`
-            : `This cell is not certain. Its color shows the solver's best-effort probability for the current round.`;
-          calc = `
-            <div class="ap-calc">
-              <div class="ap-calc-title">Calculation (best effort)</div>
-              <div class="ap-calc-step">[1] Solver starts from the current board plus any persisted 0%/100% facts.</div>
-              <div class="ap-calc-step">[2] It re-runs deduction/enumeration for this board state.</div>
-              <div class="ap-calc-step">[3] This cell is not forced, so it remains a probability estimate.</div>
-            </div>`;
-        }
-        return `
-          <div class="ap-hero">
-            <span class="ap-cell">Cell ${cellLabel}</span>
-            <span class="ap-pct" style="color:${pctColor(p)}">${pct}%</span>
-          </div>
-          <div class="ap-reason">${reason}</div>
-          ${calc}`;
-      }
 
-      // Case 4: active analysis.
-      const p = pMineCache[idx];
-      const pct = (p * 100).toFixed(1);
-      const pColor = pctColor(p);
-
-      // Brute-force records carry the exact (joint-constraint, global-count)
-      // probability. The component records that may also be present are
-      // useful for highlighting cells on the board, but the displayed
-      // number comes from brute force.
-      const bfRec = records.find(rec => rec.bruteForce);
-      if (bfRec) {
-        const total = bfRec.bfTotal;
-        const withMine = bfRec.bfMineCount;
-        const remaining = bfRec.remainingMines;
-        const totalFree = bfRec.unrevealedTotal;
-        const realRecords = records.filter(rec => !rec.globalRate && !rec.bruteForce);
-        // Count all revealed numbered cells (the constraints actually
-        // applied during brute force). This includes both frontier and
-        // non-frontier revealed numbers.
-        let totalConstraints = 0;
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            if (revealed[r][c] && adjacent[r][c] > 0) totalConstraints++;
-          }
-        }
-        let reason;
-        if (realRecords.length > 0) {
-          reason = reasonForced(realRecords, idx);
-          if (!reason) reason = realRecords.map(rec => reasonPartial(rec)).join(' ');
-        } else {
-          reason = `No number cells touch you directly, so this is set by the global mine count: ${plural(remaining, 'mine')} among ${plural(totalFree, 'unrevealed cell')}.`;
-        }
-        const subsetsTried = 1 << totalFree;
-        const calc = `
-          <div class="ap-calc">
-            <div class="ap-calc-title">Calculation (exhaustive brute force)</div>
-            <div class="ap-calc-step">[1] Free cells: <b>${totalFree}</b> unrevealed + <b>${flagsPlaced}</b> flagged. Total mines to place: <b>${remaining}</b>.</div>
-            <div class="ap-calc-step">[2] Constraint equations: <b>${totalConstraints}</b> from revealed-numbered cells (every revealed number produces one equation: <code>adj = sum of mines in its unrevealed neighbors</code>). Plus the global mine count of ${remaining}.</div>
-            <div class="ap-calc-step">[3] Enumerated <b>${subsetsTried.toLocaleString()}</b> subsets (2<sup>${totalFree}</sup>); each one is a candidate mine placement.</div>
-            <div class="ap-calc-step">[4] Filtered by every constraint equation and the global mine count. <b>${total.toLocaleString()}</b> placement${total === 1 ? '' : 's'} survived.</div>
-            <div class="ap-calc-step">[5] Your cell is a mine in <b>${withMine.toLocaleString()}</b> of those ${total.toLocaleString()} valid placements.</div>
-            <div class="ap-calc-formula">P(mine) = ${withMine.toLocaleString()} / ${total.toLocaleString()} = <b>${pct}%</b></div>
-          </div>`;
-        const legend = `
-          <div class="ap-legend">
-            <span><i style="background:#ffd866;color:#ffd866"></i> subject</span>
-            <span><i style="background:#5fd7d7;color:#5fd7d7"></i> co-unknown</span>
-            <span><i style="background:transparent;color:#f7a05f;border-style:dashed"></i> constraint</span>
-            <span><i style="background:transparent;color:#ff5555;border-style:dotted"></i> flag</span>
-          </div>`;
-        return `
-          <div class="ap-hero">
-            <span class="ap-cell">Cell ${cellLabel}</span>
-            <span class="ap-pct" style="color:${pColor}">${pct}%</span>
-          </div>
-          <div class="ap-reason">${reason}</div>
-          ${calc}
-          ${legend}`;
-      }
-
-      const realRecords = records.filter(rec => !rec.globalRate);
-      const globalRec  = records.find(rec => rec.globalRate);
-
-      let reason;
-      if (realRecords.length === 0) {
-        reason = reasonGlobal(globalRec);
-      } else {
-        // Try forced first (0% / 100%); fall back to partial.
-        reason = reasonForced(realRecords, idx);
-        if (!reason) {
-          // Combine reasons from all components, weighted.
-          reason = realRecords.map(rec => reasonPartial(rec)).join(' ');
-        }
-      }
-
-      const totalUnk = totalUnknownCount(realRecords);
-      const totalCon = totalConstraintCount(realRecords);
-
-      // Build the step-by-step calculation block.
-      let calc;
-      if (realRecords.length === 0) {
-        // Far cell: global rate only
-        const farN = globalRec.farCellCount || 0;
-        const farM = globalRec.farCellExpectedMines || 0;
-        const inN = globalRec.inComponentCellCount || 0;
-        const inE = globalRec.inComponentExpectedMines || 0;
-        calc = `
-          <div class="ap-calc">
-            <div class="ap-calc-title">Calculation (global rate fallback)</div>
-            <div class="ap-calc-step">[1] No constraint cells touch this cell — it's outside every solver component.</div>
-            <div class="ap-calc-step">[2] Total mines remaining: <b>${globalRec.remainingMines}</b> · Total unrevealed: <b>${globalRec.unrevealedTotal}</b>.</div>
-            <div class="ap-calc-step">[3] In-component cells (${inN}) collectively expect <b>~${inE.toFixed(1)}</b> mines from local constraints.</div>
-            <div class="ap-calc-step">[4] Remaining for far cells: <b>${globalRec.remainingMines}</b> − <b>${inE.toFixed(1)}</b> = <b>${farM.toFixed(1)}</b> across <b>${farN}</b> far cells.</div>
-            <div class="ap-calc-formula">P(mine) = ${farM.toFixed(1)} / ${farN} = <b>${pct}%</b></div>
-          </div>`;
-      } else {
-        // In a component: enumerate configs, count mine-at-cell.
-        // Sum total configs across all components the subject is in.
-        const subjectCompId = realRecords[0].componentId;
-        const subjRec = realRecords.find(r => r.componentId === subjectCompId) || realRecords[0];
-        const totalC = subjRec.totalConfigs;
-        const mineC = subjRec.configsWithMine;
-        const isForced = (mineC === 0 || mineC === totalC);
-        const calcSteps = [];
-        // Per-component breakdown
-        if (realRecords.length === 1) {
-          const r = realRecords[0];
-          const limitR = Math.min(1 << r.m, 1 << 20);
-          const subsets = Math.min(1 << r.m, limitR);
-          calcSteps.push(`[1] Solver component: <b>${r.m}</b> unknown cells, <b>${r.constraints.length}</b> constraint equations.`);
-          if (subsets < (1 << r.m)) {
-            calcSteps.push(`[2] Enumerated up to <b>${subsets.toLocaleString()}</b> mine placements (component too large: capped at 2²⁰).`);
-          } else {
-            calcSteps.push(`[2] Enumerated <b>${subsets.toLocaleString()}</b> mine placements (2<sup>${r.m}</sup>).`);
-          }
-          calcSteps.push(`[3] Filtered by the <b>${r.constraints.length}</b> constraint equation${r.constraints.length === 1 ? '' : 's'} from nearby revealed numbers.`);
-          if (isForced) {
-            calcSteps.push(`[4] <b>${totalC.toLocaleString()}</b> valid placement${totalC === 1 ? '' : 's'} survived. <b>Your cell is mine in ${mineC === 0 ? 'zero' : 'all'} of them</b> — probability is forced.`);
-          } else {
-            calcSteps.push(`[4] <b>${totalC.toLocaleString()}</b> valid placement${totalC === 1 ? '' : 's'} survived the filter.`);
-            calcSteps.push(`[5] Your cell is a mine in <b>${mineC.toLocaleString()}</b> of those ${totalC.toLocaleString()} placements.`);
-          }
-        } else {
-          // Multiple components (rare with bipartite BFS)
-          calcSteps.push(`[1] Cell sits at intersection of <b>${realRecords.length}</b> solver components.`);
-          for (let i = 0; i < realRecords.length; i++) {
-            const r = realRecords[i];
-            calcSteps.push(`[${2 + i}] Component ${i + 1}: ${r.m} unknowns, ${r.constraints.length} equations, ${r.totalConfigs.toLocaleString()} configs (cell is mine in ${r.configsWithMine.toLocaleString()}).`);
-          }
-          calcSteps.push(`[${2 + realRecords.length}] Combined: cell-mine configs / total configs = ${mineC.toLocaleString()} / ${totalC.toLocaleString()}.`);
-        }
-        // Global budget step. Forced local deductions stay exact; only
-        // uncertain probabilities may be scaled to fit the mine budget.
-        const inN = globalRec ? (globalRec.inComponentCellCount || 0) : 0;
-        const inE = globalRec ? (globalRec.inComponentExpectedMines || 0) : 0;
-        const farN = globalRec ? (globalRec.farCellCount || 0) : 0;
-        const sf = globalRec ? (globalRec.scaleFactor || 1) : 1;
-        if (globalRec && (inN > 0 || farN > 0)) {
-          if (isForced) {
-            calcSteps.push(`[N] Global budget check: this is a hard local deduction, so it remains <b>${mineC === 0 ? '0%' : '100%'}</b>; global adjustment cannot weaken it.`);
-          } else if (sf < 1) {
-            calcSteps.push(`[N] Global budget: <b>${globalRec.remainingMines}</b> mines; uncertain components expect <b>~${inE.toFixed(1)}</b>. Scaled only uncertain probabilities by ${sf.toFixed(2)}; forced 0%/100% cells stay exact.`);
-          } else {
-            calcSteps.push(`[N] Global budget check: ${globalRec.remainingMines} mines total, components fit (expect ~${inE.toFixed(1)}); no scaling needed.`);
-          }
-        }
-        calcSteps.push(`P(mine) = ${mineC.toLocaleString()} / ${totalC.toLocaleString()}${!isForced && sf < 1 ? ` × ${sf.toFixed(3)}` : ''} = <b>${pct}%</b>`);
-
-        calc = `
-          <div class="ap-calc">
-            <div class="ap-calc-title">Calculation (component solver)</div>
-            ${calcSteps.map(s => `<div class="ap-calc-step">${s}</div>`).join('\n')}
-            <div class="ap-calc-formula">P(mine) = <b>${pct}%</b></div>
-          </div>`;
-      }
-
-      const legend = `
-        <div class="ap-legend">
-          <span><i style="background:#ffd866;color:#ffd866"></i> subject</span>
-          <span><i style="background:#5fd7d7;color:#5fd7d7"></i> co-unknown</span>
-          <span><i style="background:transparent;color:#f7a05f;border-style:dashed"></i> constraint</span>
-          <span><i style="background:transparent;color:#ff5555;border-style:dotted"></i> flag</span>
-        </div>`;
-
-      return `
+      // The cell is forced (0% or 100%) — the caller already checked.
+      // We only pass records that actually carry constraint equations to
+      // detectForcedPattern. The generic "best-effort" record has
+      // solver metadata but no constraints — feeding it in would throw
+      // on iteration.
+      const realRecords = records.filter(rec => !rec.globalRate && !rec.bruteForce && !rec.generic);
+      const pattern = detectForcedPattern(realRecords, idx);
+      const pat = pattern && pattern.patternId ? PATTERNS[pattern.patternId] : null;
+      const pProbe = pMineCache[idx];
+      const verdictText = pProbe === 1 ? '100% mine' : '0% mine';
+      const verdictColor = pProbe === 1 ? '#ff5555' : '#5fd7d7';
+      const hero = `
         <div class="ap-hero">
           <span class="ap-cell">Cell ${cellLabel}</span>
-          <span class="ap-pct" style="color:${pColor}">${pct}%</span>
-        </div>
-        <div class="ap-reason">${reason}</div>
-        ${calc}
-        ${legend}`;
-    }
-
-  // Build the human-readable analysis HTML for a cell. The solver
-  // already produced analysisCache for this cell — we just format it.
-  // Collect cell indices that need highlighting for the current subject.
-  // Returns { subject, co: Set, constraint: Set, flag: Set }.
-  function computeHighlightSets(subjectIdx) {
-    const co = new Set();
-    const constraint = new Set();
-    const flag = new Set();
-    const records = analysisCache.get(subjectIdx) || [];
-    for (const rec of records) {
-      if (rec.globalRate || rec.generic) continue;
-      for (const f of rec.flagged || []) flag.add(f);
-      for (const ci of rec.frontier || []) constraint.add(ci);
-      for (const ci of rec.unknowns || []) {
-        if (ci !== subjectIdx) co.add(ci);
+          <span class="ap-pct" style="color:${verdictColor}">${verdictText}</span>
+        </div>`;
+      let patternBlock = '';
+      if (pat) {
+        const diagHtml = pat.diagram
+          .split('\n')
+          .map(line => line.replace(/\*([^*]+)\*/g, (_, inner) => `<span class="ap-pat-subject">${inner}</span>`))
+          .join('<br>');
+        patternBlock = `
+          <div class="ap-pattern">
+            <div class="ap-pattern-title">${pat.title}</div>
+            <pre class="ap-pattern-diagram">${diagHtml}</pre>
+            <div class="ap-pattern-blurb">${pat.blurb}</div>
+          </div>`;
       }
+      // Persistence footnote only when the fact was carried across rounds.
+      const persistNote = (genericRec && genericRec.carriedAcrossRounds)
+        ? `<div class="ap-pattern-persist">Locked from an earlier round — current board still agrees.</div>`
+        : '';
+      return hero + patternBlock + `
+        <div class="ap-reason">${pattern ? pattern.reason : 'Forced by current clues — color is the verdict.'}</div>
+        ${persistNote}`;
     }
-    return { subject: subjectIdx, co, constraint, flag };
-  }
-
-  function applyHighlights(sets) {
-    // Add the board-level gate class first so the CSS rules activate.
-    boardEl.classList.add("analysis-active");
-    for (const ci of sets.co) {
-      const el = boardEl.children[ci];
-      if (el) el.classList.add("hover-co");
-    }
-    for (const ci of sets.constraint) {
-      const el = boardEl.children[ci];
-      if (el) el.classList.add("hover-constraint");
-    }
-    for (const ci of sets.flag) {
-      const el = boardEl.children[ci];
-      if (el) el.classList.add("hover-flag");
-    }
-    const subjEl = boardEl.children[sets.subject];
-    if (subjEl) subjEl.classList.add("hover-subject");
-    analysisActive = true;
-  }
 
   function showAnalysisForCell(r, c) {
+    try {
     const idx = r * cols + c;
-    // Only analyze unrevealed unflagged cells (the ones with a probability).
-    // Revealed/flagged cells get a brief explanatory panel but no highlights.
-    const canAnalyze = !revealed[r][c];
-
-    ensureSolverFresh();
-
-    // Update panel content. Panel is docked in the layout flow so no
-    // positioning math is needed — just swap innerHTML and the browser
-    // handles placement. The dock stays at a stable size whether we're
-    // showing the placeholder or live math, so the layout never jumps.
-    if (!analysisEl) return;
-    analysisEl.innerHTML = buildAnalysis(r, c);
-
-    // Clear any prior highlights, then apply new ones if applicable.
+    // Clear any prior highlights before we decide what to show. We
+    // re-apply only the subject ring below, only when we actually
+    // surface a pattern.
     if (analysisActive) {
       for (const cellEl of boardEl.children) {
-        cellEl.classList.remove(
-          "hover-subject", "hover-co", "hover-constraint", "hover-flag"
-        );
+        cellEl.classList.remove("hover-subject", "hover-co", "hover-constraint", "hover-flag");
       }
-    }
-
-    if (!canAnalyze) {
-      boardEl.classList.remove("analysis-active");
       analysisActive = false;
-      // Still highlight the subject briefly with the gold ring so user
-      // sees which cell the panel refers to.
-      const subjEl = boardEl.children[idx];
-      if (subjEl) {
-        boardEl.classList.add("analysis-active");
-        subjEl.classList.add("hover-subject");
-        analysisActive = true;
-      }
-      analysisSubjectIdx = idx;
+    }
+    boardEl.classList.remove("analysis-active");
+    analysisSubjectIdx = -1;
+
+    // Skip everything that's not a hidden, unflagged, non-terminal
+    // cell. Revealed cells already show their number, flagged cells
+    // show the flag, and partial probabilities are read off the
+    // gradient. None of those need a hover panel.
+    if (revealed[r][c] || flagged[r][c] || gameOver) {
+      showPlaceholder();
       return;
     }
 
-    const sets = computeHighlightSets(idx);
-    applyHighlights(sets);
+    // Show the panel only for cells that are exactly 0% or 100% mine.
+    // Partial probabilities and "almost certain" cases both stay as
+    // the placeholder — the gradient color is the indicator and we
+    // don't surface the panel for borderline cases. We check the
+    // exact-state cache (an Int8Array of {−1, 0, 1}) rather than the
+    // float probability because floats can be 0.0000001 etc. — the
+    // exact cache is the authoritative yes/no for "is this forced".
+    ensureSolverFresh();
+    const exact = exactFactCache && exactFactCache[idx];
+    if (exact !== 0 && exact !== 1) {
+      showPlaceholder();
+      return;
+    }
+
+    // Render the panel and apply the subject ring.
+    if (!analysisEl) return;
+    analysisEl.innerHTML = buildAnalysis(r, c);
+    const subjEl = boardEl.children[idx];
+    if (subjEl) {
+      boardEl.classList.add("analysis-active");
+      subjEl.classList.add("hover-subject");
+      analysisActive = true;
+    }
     analysisSubjectIdx = idx;
+    } catch (err) {
+      console.error('showAnalysisForCell failed for', r, c, err);
+      if (analysisEl) showPlaceholder();
+    }
   }
 
   function handleHover(e) {
@@ -1879,26 +2038,38 @@
   autoOpenBtnEl = document.getElementById("autoOpenBtn");
   copyLayoutBtnEl = document.getElementById("copyLayoutBtn");
   analysisEl    = document.getElementById("analysis");
+
+  // Set just the label portion of an icon+label button, leaving the icon
+  // span in place. Falls back to plain textContent if the markup isn't
+  // structured with a .btn-label child (defensive — keeps older markup
+  // working).
+  function setBtnLabel(btn, text) {
+    const label = btn.querySelector(".btn-label");
+    if (label) label.textContent = text;
+    else btn.textContent = text;
+  }
+
   faceEl.addEventListener("click", () => newGame());
   insightBtnEl.addEventListener("click", () => setInsight(!showInsight));
   autoFlagBtnEl.addEventListener("click", () => { autoFlagSureMines(); });
   autoOpenBtnEl.addEventListener("click", () => {
     const opened = autoOpenSureSafeCells();
     if (!opened && !gameOver && !firstClick) {
-      // No frontier 0% move available right now. Briefly label the button
-      // so the user knows it didn't silently fail.
-      const original = autoOpenBtnEl.textContent;
-      autoOpenBtnEl.textContent = "No 0% next to revealed";
+      // No frontier 0% move available right now. Briefly relabel the
+      // button so the user knows it didn't silently fail.
+      const originalLabel = autoOpenBtnEl.querySelector(".btn-label");
+      const original = originalLabel ? originalLabel.textContent : autoOpenBtnEl.textContent;
+      setBtnLabel(autoOpenBtnEl, "No 0% next to revealed");
       autoOpenBtnEl.disabled = true;
       setTimeout(() => {
-        autoOpenBtnEl.textContent = original;
+        setBtnLabel(autoOpenBtnEl, original);
         autoOpenBtnEl.disabled = false;
       }, 900);
     }
   });
   copyLayoutBtnEl.addEventListener("click", () => {
     copyLayout().catch(err => {
-      copyLayoutBtnEl.textContent = "Copy failed";
+      setBtnLabel(copyLayoutBtnEl, "Copy failed");
       console.error(err);
     });
   });
