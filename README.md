@@ -2,6 +2,10 @@
 
 A classic Minesweeper game implemented in a single HTML5 file — no build step, no dependencies, no server. Open `index.html` in any modern browser to play.
 
+## Play online
+
+https://long123king.github.io/minesweep
+
 ## How to play
 
 - **Left-click** — reveal a cell
