@@ -24,6 +24,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # NOTE: `enablement: true` can only auto-create the Pages site when a token
+      # with repository-admin permissions is supplied (e.g. via a PAT/secret).
+      # The default GITHUB_TOKEN cannot create the initial Pages site, so Pages
+      # must first be enabled once manually: Settings -> Pages -> Build and
+      # deployment -> Source: "GitHub Actions".
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
