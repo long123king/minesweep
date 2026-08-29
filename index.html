@@ -560,8 +560,22 @@
     color: var(--text-dim);
     font-size: 11px;
     text-align: center;
-    line-height: 1.5;
-    max-width: 480px;
+    line-height: 1.6;
+    max-width: 560px;
+  }
+  .help strong {
+    color: var(--text);
+    font-weight: 700;
+  }
+  .help .hint-safe,
+  .tutorial-intro .hint-safe {
+    color: #5fd7d7;
+    font-weight: 700;
+  }
+  .help .hint-mine,
+  .tutorial-intro .hint-mine {
+    color: #ff6b6b;
+    font-weight: 700;
   }
 
   /* Win detail modal — shown when a round is won, summarizing duration,
@@ -687,12 +701,12 @@
     </div>
     <div class="footer" id="difficulty"></div>
     <div class="help">
-      Left-click: reveal · Right-click / long-press: flag · Click number: chord reveal · Insight: heat-map unrevealed cells by mine probability · Hover a 100% or 0% cell to see the pattern that proves it · Shortcuts: R new game, I insight, F auto flag, O auto open, C copy layout
+      <strong>Reveal</strong>: left-click · <strong>Flag</strong>: right-click / long-press · <strong>Chord</strong>: click a number · <strong>Insight</strong>: heat-map mine odds · <strong>Hover</strong>: exact <span class="hint-safe">0%</span> / <span class="hint-mine">100%</span> cells show the proof · <strong>Shortcuts</strong>: R reset, I insight, F auto-flag, O auto-open, C copy layout
     </div>
     <details class="tutorial">
-      <summary>Fundamental patterns (how each forced cell is proved)</summary>
+      <summary>Learn the forced-cell patterns</summary>
       <div class="tutorial-body">
-        <div class="tutorial-intro">Every blue (0%) or red (100%) cell on the board comes from one of the patterns below. Hover any colored cell to see which pattern applies to it. Diagrams are drawn in the same style as Insight mode: red cells are 100% mine, blue cells are 0% mine, the cell being proved carries a small <span class="tut-subject">★</span> marker.</div>
+        <div class="tutorial-intro">Every <span class="hint-safe">blue (0%)</span> or <span class="hint-mine">red (100%)</span> cell on the board comes from one of the patterns below. Hover any colored cell to see which pattern applies. Diagrams follow the same color rules as Insight mode: <span class="hint-mine">red = 100% mine</span>, <span class="hint-safe">blue = 0% mine</span>, and the cell being proved carries a small <span class="tut-subject">★</span> marker.</div>
 
         <div class="tutorial-pattern">
           <div class="tutorial-pattern-title">1. Single-clue forced mine</div>
@@ -2238,12 +2252,17 @@
   // don't trigger recomputation.
   boardEl.addEventListener("pointermove", handleHover);
 
-  // Keyboard: R = reset, Esc = dismiss analysis / close win modal,
+  // Keyboard: R = reset, Enter = restart after a win, Esc = dismiss analysis / close win modal,
   // I = toggle Insight, F = Auto Flag 100%, O = Auto Open 0%, C = Copy Layout.
   document.addEventListener("keydown", e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return; // don't hijack browser shortcuts
     const key = e.key.toLowerCase();
     if (key === "r") newGame();
+    else if (key === "enter" && won && !winModalEl.hidden) {
+      e.preventDefault();
+      hideWinModal();
+      newGame();
+    }
     else if (e.key === "Escape") { hideWinModal(); clearAnalysis(); }
     else if (key === "i") setInsight(!showInsight);
     else if (key === "f") autoFlagSureMines();
