@@ -1195,9 +1195,15 @@
       ["Auto Open uses", `${autoOpenUses} (${autoOpenCells} cells)`],
       ["Mines", String(mineCount)],
     ];
-    statsEl.innerHTML = rows_.map(([label, value]) =>
-      `<dt>${label}</dt><dd>${value}</dd>`
-    ).join("");
+    statsEl.textContent = "";
+    for (const [label, value] of rows_) {
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      statsEl.appendChild(dt);
+      statsEl.appendChild(dd);
+    }
     winModalEl.hidden = false;
   }
 
@@ -2121,7 +2127,7 @@
     longPressTimer = setTimeout(() => {
       longPressTriggered = true;
       const r = +target.dataset.r, c = +target.dataset.c;
-      clickCount++;
+      if (!gameOver) clickCount++;
       toggleFlag(r, c);
     }, 350);
   }
