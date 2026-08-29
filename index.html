@@ -195,6 +195,12 @@
     box-sizing: border-box;
     z-index: 10;
   }
+  /* Hidden while Insight is OFF — the panel's math is derived from the
+     same solver Insight uses, so it only makes sense alongside it.
+     Toggled in lockstep with .board.insight-on via setInsight(). */
+  .analysis-panel.hidden {
+    display: none;
+  }
   .analysis-panel .ap-empty {
     color: var(--text-dim);
     text-align: center;
@@ -672,7 +678,7 @@
            position and size stay exactly the same whether the panel is
            empty, showing placeholder, or showing live math. Anchored to
            .board-wrap (which is position:relative). -->
-      <aside class="analysis-panel" id="analysis" aria-live="polite">
+      <aside class="analysis-panel hidden" id="analysis" aria-live="polite">
         <div class="ap-empty">
           <div class="ap-empty-title">Hover a cell</div>
           <div class="ap-empty-body">to see its mine probability</div>
@@ -1534,11 +1540,13 @@
     insightBtnEl.classList.toggle("active", showInsight);
     setBtnLabel(insightBtnEl, showInsight ? "Insight: ON" : "Insight: OFF");
     insightBtnEl.setAttribute("aria-pressed", showInsight ? "true" : "false");
+    if (analysisEl) analysisEl.classList.toggle("hidden", !showInsight);
     if (showInsight) {
       pMineDirty = true;
       paintInsight();
     } else {
       clearInsight();
+      clearAnalysis();
     }
   }
 
