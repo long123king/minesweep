@@ -1121,6 +1121,7 @@
     if (openedAny) {
       autoOpenUses++;
       autoOpenCells += cellsRevealed - startCellsRevealed;
+      if (won) showWinModal();
     }
     // Clear any stale hover-analysis marks accumulated during the burst.
     clearAnalysis();
